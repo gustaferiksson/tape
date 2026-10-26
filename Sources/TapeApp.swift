@@ -38,6 +38,8 @@ private struct TapeMenu: View {
                 .disabled(!recorder.isRecording)
             Text("Recording audio · since \(since.formatted(date: .omitted, time: .shortened))\(recorder.isSavingToFallback ? " · saving to Movies › Tape" : "")")
             Text(recorder.microphoneName.map { "Microphone: \($0)" } ?? "Microphone unavailable")
+            Toggle("Reduce Echo", isOn: Bindable(settings).reducesEcho)
+                .disabled(true)
             Divider()
             Button("Open Recordings Folder", action: openFolder)
             Divider()
@@ -55,6 +57,8 @@ private struct TapeMenu: View {
                     Button("Open Privacy Settings…") { NSWorkspace.shared.open(pane.url) }
                 }
             }
+            Divider()
+            Toggle("Reduce Echo", isOn: Bindable(settings).reducesEcho)
             Divider()
             Button("Show Last Recording in Finder") {
                 if let url = recorder.lastRecording { NSWorkspace.shared.activateFileViewerSelecting([url]) }

@@ -41,6 +41,17 @@ struct GeneralSettings: View {
             }
 
             Section {
+                Toggle(isOn: $settings.reducesEcho) {
+                    Text("Reduce Echo")
+                    Text("Removes other people’s voices from your microphone when you’re on speakers. Experimental.")
+                }
+            } header: {
+                Text("Microphone")
+            } footer: {
+                Text("Applies from the next recording.")
+            }
+
+            Section {
                 Toggle("Launch at login", isOn: Binding(
                     get: { loginStatus == .enabled || loginStatus == .requiresApproval },
                     set: setLaunchAtLogin
@@ -80,7 +91,7 @@ struct GeneralSettings: View {
             }
         }
         .formStyle(.grouped)
-        .frame(height: 340)
+        .frame(height: 496)
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             loginStatus = SMAppService.mainApp.status
         }

@@ -81,7 +81,7 @@ final class Recorder {
         settings.store.set(["path": url.path, "pid": Int(getpid())], forKey: "inProgressRecording")
         let id = UUID()
         sessionID = id
-        let session = try? CaptureSession(url: url, probesTap: settings.store.bool(forKey: "systemAudioConfirmed")) { [weak self] event in
+        let session = try? CaptureSession(url: url, probesTap: settings.store.bool(forKey: "systemAudioConfirmed"), microphonePath: settings.reducesEcho ? .voiceProcessing : .aggregate) { [weak self] event in
             Task { @MainActor in self?.handle(event, from: id) }
         }
         guard let session, (try? await session.start()) != nil else {
