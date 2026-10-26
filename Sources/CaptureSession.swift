@@ -1,8 +1,9 @@
 import AVFoundation
 import CoreAudio
+import Synchronization
 import TapeCore
 
-enum CaptureEvent: Sendable {
+enum CaptureEvent: Sendable, Equatable {
     case microphone(String?)
     case systemAudioDenied
     case deviceFailed
@@ -17,30 +18,39 @@ struct CaptureError: LocalizedError {
     }
 }
 
-// Device state lives on `controlQueue`, sample state on `ioQueue`. AudioDeviceStop waits for the IOProc, so it must never run on the IOProc's own queue.
+// The realtime IOProc only mixes into `ring`. Device state is owned by `controlQueue`; conversion and writing by `processingQueue`.
 final class CaptureSession: @unchecked Sendable {
     private static let outputRate = 48000.0
+    private static let rebuildAttemptsWithMicrophone = 3
 
     private let controlQueue = DispatchQueue(label: "dev.gustaf.tape.control")
-    private let ioQueue = DispatchQueue(label: "dev.gustaf.tape.io", qos: .userInteractive)
+    private let processingQueue = DispatchQueue(label: "dev.gustaf.tape.processing", qos: .userInitiated)
+    private let ring = AudioRing(slots: 256, framesPerSlot: 8192)
+    private let deviceRate = Atomic<UInt64>(0)
+    private let heardSystemAudio = Atomic<Bool>(false)
     private let writer: AVAssetWriter
     private let input: AVAssetWriterInput
     private let outputFormat: AVAudioFormat
-    private let sampleFormat: CMAudioFormatDescription
     private let probesTap: Bool
     private let onEvent: @Sendable (CaptureEvent) -> Void
 
     private var tap: (id: AudioObjectID, description: CATapDescription)?
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
     private var procID: AudioDeviceIOProcID?
+    private var rateListeners: [(AudioObjectID, AudioObjectPropertyListenerBlock)] = []
+    private var defaultInputListener: AudioObjectPropertyListenerBlock?
+    private var rebuildRequest = 0
+    private var isStopping = false
+    private var didReportDenial = false
+
     private var converter: AVAudioConverter?
+    private var converterRate = 0.0
     private var limiter = PeakLimiter(sampleRate: CaptureSession.outputRate)
     private var framesWritten: Int64 = 0
     private var expectedHostSeconds: Double?
-    private var hasSystemAudio = false
     private var isFinished = false
-    private var probeTimer: DispatchSourceTimer?
-    private var defaultInputListener: AudioObjectPropertyListenerBlock?
+    private var drainTimer: DispatchSourceTimer?
+    private let silence = [Float](repeating: 0, count: 4096)
 
     init(url: URL, probesTap: Bool, onEvent: @escaping @Sendable (CaptureEvent) -> Void) throws {
         writer = try AVAssetWriter(outputURL: url, fileType: .m4a)
@@ -58,47 +68,67 @@ final class CaptureSession: @unchecked Sendable {
             throw CaptureError("Couldn’t describe the output format.")
         }
         self.outputFormat = outputFormat
-        sampleFormat = outputFormat.formatDescription
         self.probesTap = probesTap
         self.onEvent = onEvent
     }
 
-    func start() throws {
-        guard writer.startWriting() else { throw writer.error ?? CaptureError("Couldn’t create the file.") }
-        writer.startSession(atSourceTime: .zero)
-        try controlQueue.sync {
-            tap = try Self.makeTap()
-            try startAggregate()
-            listenForDefaultInput()
-            if probesTap { startProbe() }
+    func start() async throws {
+        try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, any Error>) in
+            controlQueue.async { [self] in
+                do {
+                    guard writer.startWriting() else { throw writer.error ?? CaptureError("Couldn’t create the file.") }
+                    writer.startSession(atSourceTime: .zero)
+                    processingQueue.sync { startDraining() }
+                    tap = try Self.makeTap()
+                    try startAggregate(includeMicrophone: true)
+                    listenForDefaultInput()
+                    if probesTap { scheduleProbes() }
+                    done.resume()
+                } catch {
+                    done.resume(throwing: error)
+                }
+            }
         }
     }
 
     func finish() async -> Bool {
-        controlQueue.sync {
-            probeTimer?.cancel()
-            if let defaultInputListener {
-                var address = Self.address(kAudioHardwarePropertyDefaultInputDevice)
-                AudioObjectRemovePropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, controlQueue, defaultInputListener)
+        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+            controlQueue.async { [self] in
+                isStopping = true
+                if let defaultInputListener {
+                    var address = Self.address(kAudioHardwarePropertyDefaultInputDevice)
+                    AudioObjectRemovePropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, controlQueue, defaultInputListener)
+                }
+                defaultInputListener = nil
+                stopAggregate()
+                if let tap { AudioHardwareDestroyProcessTap(tap.id) }
+                tap = nil
+                done.resume()
             }
-            stopAggregate()
-            if let tap { AudioHardwareDestroyProcessTap(tap.id) }
         }
-        let hadSystemAudio = ioQueue.sync {
-            isFinished = true
-            if writer.status == .writing { input.markAsFinished() }
-            return hasSystemAudio
+        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+            processingQueue.async { [self] in
+                drainTimer?.cancel()
+                drainTimer = nil
+                drain()
+                flushConverter()
+                isFinished = true
+                if writer.status == .writing { input.markAsFinished() }
+                done.resume()
+            }
         }
         if writer.status == .writing { await writer.finishWriting() }
-        return hadSystemAudio
+        return heardSystemAudio.load(ordering: .relaxed)
     }
 
-    private func startAggregate() throws {
-        guard let tap else { return }
-        let micID = Self.defaultDevice(kAudioHardwarePropertyDefaultInputDevice)
-        let micUID = micID.flatMap { Self.string(of: $0, kAudioDevicePropertyDeviceUID) }
-        let clockUID = micUID ?? Self.defaultDevice(kAudioHardwarePropertyDefaultOutputDevice).flatMap { Self.string(of: $0, kAudioDevicePropertyDeviceUID) }
-        guard let clockUID else { throw CaptureError("No audio device is available.") }
+    // MARK: Devices (controlQueue)
+
+    private func startAggregate(includeMicrophone: Bool) throws {
+        guard let tap else { throw CaptureError("System audio isn’t tapped.") }
+        let micID = includeMicrophone ? Self.defaultDevice(kAudioHardwarePropertyDefaultInputDevice) : nil
+        guard let clockID = micID ?? Self.defaultDevice(kAudioHardwarePropertyDefaultOutputDevice),
+              let clockUID = Self.string(of: clockID, kAudioDevicePropertyDeviceUID)
+        else { throw CaptureError("No audio device is available.") }
         let composition: [String: Any] = [
             kAudioAggregateDeviceNameKey: "Tape",
             kAudioAggregateDeviceUIDKey: "dev.gustaf.tape.aggregate.\(UUID().uuidString)",
@@ -114,18 +144,23 @@ final class CaptureSession: @unchecked Sendable {
         guard created == noErr else { throw CaptureError("Couldn’t create the capture device.", status: created) }
         aggregateID = aggregate
 
-        var rate = Float64(0)
-        var size = UInt32(MemoryLayout<Float64>.size)
-        var rateAddress = Self.address(kAudioDevicePropertyNominalSampleRate)
-        AudioObjectGetPropertyData(aggregate, &rateAddress, 0, nil, &size, &rate)
-        guard rate > 0, let deviceFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: rate, channels: 1, interleaved: false) else {
-            throw CaptureError("The capture device has no sample rate.")
+        guard let rate = Self.sampleRate(of: aggregate) else { throw CaptureError("The capture device has no sample rate.") }
+        deviceRate.store(rate.bitPattern, ordering: .relaxed)
+
+        // Sub-device streams come first in the aggregate (FullSubDeviceList order), then the tap's.
+        let tapIndex = Self.inputStreamCount(of: clockID)
+        guard Self.inputStreamCount(of: aggregate) > tapIndex else { throw CaptureError("The capture device has no system audio stream.") }
+
+        for object in [aggregate, clockID] {
+            let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in self?.sampleRateChanged(on: object) }
+            var address = Self.address(kAudioDevicePropertyNominalSampleRate)
+            AudioObjectAddPropertyListenerBlock(object, &address, controlQueue, listener)
+            rateListeners.append((object, listener))
         }
-        ioQueue.sync { converter = AVAudioConverter(from: deviceFormat, to: outputFormat) }
 
         var proc: AudioDeviceIOProcID?
-        let createdProc = AudioDeviceCreateIOProcIDWithBlock(&proc, aggregate, ioQueue) { [weak self] _, inputData, inputTime, _, _ in
-            self?.process(inputData, at: inputTime.pointee, sampleRate: rate)
+        let createdProc = AudioDeviceCreateIOProcIDWithBlock(&proc, aggregate, nil) { [self] _, inputData, inputTime, _, _ in
+            capture(inputData, at: inputTime.pointee, tapIndex: tapIndex)
         }
         guard createdProc == noErr, let proc else { throw CaptureError("Couldn’t read the capture device.", status: createdProc) }
         procID = proc
@@ -135,6 +170,11 @@ final class CaptureSession: @unchecked Sendable {
     }
 
     private func stopAggregate() {
+        for (object, listener) in rateListeners {
+            var address = Self.address(kAudioDevicePropertyNominalSampleRate)
+            AudioObjectRemovePropertyListenerBlock(object, &address, controlQueue, listener)
+        }
+        rateListeners = []
         if let procID {
             AudioDeviceStop(aggregateID, procID)
             AudioDeviceDestroyIOProcID(aggregateID, procID)
@@ -142,75 +182,129 @@ final class CaptureSession: @unchecked Sendable {
         if aggregateID != kAudioObjectUnknown { AudioHardwareDestroyAggregateDevice(aggregateID) }
         procID = nil
         aggregateID = AudioObjectID(kAudioObjectUnknown)
-        ioQueue.sync { converter = nil }
     }
 
     private func listenForDefaultInput() {
-        let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-            guard let self, !ioQueue.sync(execute: { isFinished }) else { return }
-            stopAggregate()
-            do {
-                try startAggregate()
-            } catch {
-                onEvent(.deviceFailed)
-            }
-        }
+        let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in self?.requestRebuild() }
         var address = Self.address(kAudioHardwarePropertyDefaultInputDevice)
         AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, controlQueue, listener)
         defaultInputListener = listener
     }
 
+    private func sampleRateChanged(on device: AudioObjectID) {
+        guard let rate = Self.sampleRate(of: device), rate != Double(bitPattern: deviceRate.load(ordering: .relaxed)) else { return }
+        requestRebuild()
+    }
+
+    private func requestRebuild() {
+        guard !isStopping else { return }
+        rebuildRequest += 1
+        let request = rebuildRequest
+        controlQueue.async { [weak self] in self?.rebuild(request: request, attempt: 0) }
+    }
+
+    private func rebuild(request: Int, attempt: Int) {
+        guard !isStopping, request == rebuildRequest else { return }
+        stopAggregate()
+        do {
+            try startAggregate(includeMicrophone: attempt < Self.rebuildAttemptsWithMicrophone)
+            return
+        } catch {
+            stopAggregate()
+        }
+        guard attempt < Self.rebuildAttemptsWithMicrophone else {
+            onEvent(.deviceFailed)
+            return
+        }
+        controlQueue.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.rebuild(request: request, attempt: attempt + 1) }
+    }
+
+    private func scheduleProbes() {
+        for delay in [3.0, 8.0] {
+            controlQueue.asyncAfter(deadline: .now() + delay) { [weak self] in self?.probeSystemAudioPermission() }
+        }
+    }
+
     // Undocumented (spike 2): rewriting a tap's description reportedly fails with kAudioDevicePermissionsError once system audio access is denied.
-    private func startProbe() {
-        let timer = DispatchSource.makeTimerSource(queue: controlQueue)
-        timer.schedule(deadline: .now() + 2, repeating: 2)
-        timer.setEventHandler { [weak self] in
-            guard let self, let tap else { return }
-            let (finished, heard) = ioQueue.sync { (isFinished, hasSystemAudio) }
-            guard !finished, !heard else {
-                probeTimer?.cancel()
-                return
-            }
-            var address = Self.address(kAudioTapPropertyDescription)
-            let status = withUnsafePointer(to: tap.description) {
-                AudioObjectSetPropertyData(tap.id, &address, 0, nil, UInt32(MemoryLayout<CATapDescription>.size), $0)
-            }
-            guard status == kAudioDevicePermissionsError else { return }
-            probeTimer?.cancel()
-            onEvent(.systemAudioDenied)
+    private func probeSystemAudioPermission() {
+        guard !isStopping, !didReportDenial, let tap, !heardSystemAudio.load(ordering: .relaxed) else { return }
+        var address = Self.address(kAudioTapPropertyDescription)
+        let status = withUnsafePointer(to: tap.description) {
+            AudioObjectSetPropertyData(tap.id, &address, 0, nil, UInt32(MemoryLayout<CATapDescription>.size), $0)
         }
-        timer.resume()
-        probeTimer = timer
+        guard status == kAudioDevicePermissionsError else { return }
+        didReportDenial = true
+        onEvent(.systemAudioDenied)
     }
 
-    private func process(_ data: UnsafePointer<AudioBufferList>, at time: AudioTimeStamp, sampleRate: Double) {
-        guard !isFinished, let converter else { return }
-        let streams = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: data)).compactMap { buffer -> InterleavedStream? in
-            guard let raw = buffer.mData, buffer.mNumberChannels > 0 else { return nil }
-            let count = Int(buffer.mDataByteSize) / MemoryLayout<Float>.size
-            return InterleavedStream(samples: UnsafeBufferPointer(start: raw.assumingMemoryBound(to: Float.self), count: count), channels: Int(buffer.mNumberChannels))
-        }
-        guard let first = streams.first else { return }
-        let frames = first.samples.count / first.channels
-        // The aggregate lists sub-device streams before tap streams, so the tap is the last buffer.
-        if !hasSystemAudio, let system = streams.last, system.samples.contains(where: { $0 != 0 }) { hasSystemAudio = true }
+    // MARK: Realtime IOProc
 
+    private func capture(_ data: UnsafePointer<AudioBufferList>, at time: AudioTimeStamp, tapIndex: Int) {
+        let buffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: data))
+        guard let first = buffers.first(where: { $0.mData != nil && $0.mNumberChannels > 0 }) else { return }
+        let available = Int(first.mDataByteSize) / MemoryLayout<Float>.size / Int(first.mNumberChannels)
         let hostSeconds = Double(AudioConvertHostTimeToNanos(time.mHostTime)) / 1e9
-        let gap = expectedHostSeconds.map { SilenceGap.frames(expectedSeconds: $0, actualSeconds: hostSeconds, sampleRate: sampleRate) } ?? 0
-        expectedHostSeconds = hostSeconds + Double(frames) / sampleRate
-        let mixed = [Float](repeating: 0, count: gap) + Mixer.mix(streams, frames: frames)
-        guard var samples = convert(mixed, with: converter, sampleRate: sampleRate), !samples.isEmpty else { return }
-        limiter.process(&samples)
-        append(samples)
+        let rate = Double(bitPattern: deviceRate.load(ordering: .relaxed))
+        ring.write(hostSeconds: hostSeconds, sampleRate: rate) { slot in
+            let frames = min(available, slot.count)
+            let output = UnsafeMutableBufferPointer(rebasing: slot[0..<frames])
+            output.update(repeating: 0)
+            for index in buffers.indices {
+                let buffer = buffers[index]
+                guard let raw = buffer.mData, buffer.mNumberChannels > 0 else { continue }
+                let stream = InterleavedStream(
+                    samples: UnsafeBufferPointer(start: raw.assumingMemoryBound(to: Float.self), count: Int(buffer.mDataByteSize) / MemoryLayout<Float>.size),
+                    channels: Int(buffer.mNumberChannels)
+                )
+                if index == tapIndex, !heardSystemAudio.load(ordering: .relaxed), stream.samples.contains(where: { $0 != 0 }) {
+                    heardSystemAudio.store(true, ordering: .relaxed)
+                }
+                Mixer.addLoudestChannel(of: stream, into: output)
+            }
+            return frames
+        }
     }
 
-    private func convert(_ samples: [Float], with converter: AVAudioConverter, sampleRate: Double) -> [Float]? {
-        guard let source = AVAudioPCMBuffer(pcmFormat: converter.inputFormat, frameCapacity: AVAudioFrameCount(samples.count)),
-              let destination = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: AVAudioFrameCount(Double(samples.count) * Self.outputRate / sampleRate) + 1024),
+    // MARK: Writing (processingQueue)
+
+    private func startDraining() {
+        let timer = DispatchSource.makeTimerSource(queue: processingQueue)
+        timer.schedule(deadline: .now() + .milliseconds(20), repeating: .milliseconds(20))
+        timer.setEventHandler { [weak self] in self?.drain() }
+        timer.resume()
+        drainTimer = timer
+    }
+
+    private func drain() {
+        while !isFinished, ring.read({ chunk, samples in consume(chunk, samples) }) {}
+    }
+
+    private func consume(_ chunk: AudioRingChunk, _ samples: UnsafeBufferPointer<Float>) {
+        guard chunk.sampleRate > 0 else { return }
+        if chunk.sampleRate != converterRate {
+            flushConverter()
+            converter = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: chunk.sampleRate, channels: 1, interleaved: false)
+                .flatMap { AVAudioConverter(from: $0, to: outputFormat) }
+            converterRate = chunk.sampleRate
+        }
+        var gap = expectedHostSeconds.map { SilenceGap.frames(expectedSeconds: $0, actualSeconds: chunk.hostSeconds, sampleRate: chunk.sampleRate) } ?? 0
+        while gap > 0 {
+            let count = min(gap, silence.count)
+            silence.withUnsafeBufferPointer { push(UnsafeBufferPointer(rebasing: $0[0..<count])) }
+            gap -= count
+        }
+        expectedHostSeconds = chunk.hostSeconds + Double(chunk.frames) / chunk.sampleRate
+        push(samples)
+    }
+
+    private func push(_ samples: UnsafeBufferPointer<Float>) {
+        guard !samples.isEmpty, let converter, let base = samples.baseAddress,
+              let source = AVAudioPCMBuffer(pcmFormat: converter.inputFormat, frameCapacity: AVAudioFrameCount(samples.count)),
+              let destination = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: AVAudioFrameCount(Double(samples.count) * Self.outputRate / converterRate) + 1024),
               let sourceChannel = source.floatChannelData?[0]
-        else { return nil }
+        else { return }
         source.frameLength = AVAudioFrameCount(samples.count)
-        samples.withUnsafeBufferPointer { sourceChannel.update(from: $0.baseAddress!, count: samples.count) }
+        sourceChannel.update(from: base, count: samples.count)
         var supplied = false
         var error: NSError?
         converter.convert(to: destination, error: &error) { _, status in
@@ -222,11 +316,30 @@ final class CaptureSession: @unchecked Sendable {
             status.pointee = .haveData
             return source
         }
-        guard error == nil, let channel = destination.floatChannelData?[0] else { return nil }
-        return Array(UnsafeBufferPointer(start: channel, count: Int(destination.frameLength)))
+        guard error == nil else { return }
+        append(destination)
     }
 
-    private func append(_ samples: [Float]) {
+    private func flushConverter() {
+        guard let converter, let destination = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: 8192) else { return }
+        var error: NSError?
+        converter.convert(to: destination, error: &error) { _, status in
+            status.pointee = .endOfStream
+            return nil
+        }
+        if error == nil { append(destination) }
+        self.converter = nil
+        converterRate = 0
+    }
+
+    private func append(_ buffer: AVAudioPCMBuffer) {
+        guard buffer.frameLength > 0, let channel = buffer.floatChannelData?[0] else { return }
+        guard writer.status == .writing else {
+            failWriting()
+            return
+        }
+        var samples = Array(UnsafeBufferPointer(start: channel, count: Int(buffer.frameLength)))
+        limiter.process(&samples)
         let byteCount = samples.count * MemoryLayout<Float>.size
         let timestamp = CMTime(value: framesWritten, timescale: CMTimeScale(Self.outputRate))
         framesWritten += Int64(samples.count)
@@ -236,15 +349,19 @@ final class CaptureSession: @unchecked Sendable {
         guard CMBlockBufferCreateWithMemoryBlock(allocator: nil, memoryBlock: nil, blockLength: byteCount, blockAllocator: nil, customBlockSource: nil, offsetToData: 0, dataLength: byteCount, flags: 0, blockBufferOut: &block) == noErr,
               let block,
               samples.withUnsafeBytes({ CMBlockBufferReplaceDataBytes(with: $0.baseAddress!, blockBuffer: block, offsetIntoDestination: 0, dataLength: byteCount) }) == noErr,
-              CMAudioSampleBufferCreateReadyWithPacketDescriptions(allocator: nil, dataBuffer: block, formatDescription: sampleFormat, sampleCount: samples.count, presentationTimeStamp: timestamp, packetDescriptions: nil, sampleBufferOut: &sample) == noErr,
+              CMAudioSampleBufferCreateReadyWithPacketDescriptions(allocator: nil, dataBuffer: block, formatDescription: outputFormat.formatDescription, sampleCount: samples.count, presentationTimeStamp: timestamp, packetDescriptions: nil, sampleBufferOut: &sample) == noErr,
               let sample
         else { return }
-        guard input.append(sample) else {
-            isFinished = true
-            onEvent(.writeFailed)
-            return
-        }
+        if !input.append(sample) { failWriting() }
     }
+
+    private func failWriting() {
+        guard !isFinished else { return }
+        isFinished = true
+        onEvent(.writeFailed)
+    }
+
+    // MARK: Core Audio properties
 
     private static func makeTap() throws -> (id: AudioObjectID, description: CATapDescription) {
         var pid = getpid()
@@ -262,6 +379,21 @@ final class CaptureSession: @unchecked Sendable {
         let created = AudioHardwareCreateProcessTap(description, &tapID)
         guard created == noErr else { throw CaptureError("Couldn’t tap system audio.", status: created) }
         return (tapID, description)
+    }
+
+    private static func sampleRate(of device: AudioObjectID) -> Double? {
+        var rate = Float64(0)
+        var size = UInt32(MemoryLayout<Float64>.size)
+        var address = address(kAudioDevicePropertyNominalSampleRate)
+        let status = AudioObjectGetPropertyData(device, &address, 0, nil, &size, &rate)
+        return status == noErr && rate > 0 ? rate : nil
+    }
+
+    private static func inputStreamCount(of device: AudioObjectID) -> Int {
+        var size = UInt32(0)
+        var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyStreams, mScope: kAudioObjectPropertyScopeInput, mElement: kAudioObjectPropertyElementMain)
+        guard AudioObjectGetPropertyDataSize(device, &address, 0, nil, &size) == noErr else { return 0 }
+        return Int(size) / MemoryLayout<AudioStreamID>.size
     }
 
     private static func defaultDevice(_ selector: AudioObjectPropertySelector) -> AudioObjectID? {

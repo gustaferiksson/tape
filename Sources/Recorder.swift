@@ -26,6 +26,8 @@ final class Recorder {
 
     @ObservationIgnored private let settings: AppSettings
     @ObservationIgnored private var session: CaptureSession?
+    @ObservationIgnored private var sessionID: UUID?
+    @ObservationIgnored private var lastDiskCheck = Date.distantPast
     @ObservationIgnored private var recordingURL: URL?
     @ObservationIgnored private var recordingVolume = ""
     @ObservationIgnored private var fallbackFrom: String?
@@ -76,11 +78,14 @@ final class Recorder {
             return
         }
         let url = RecordingFile.url(in: folder, startedAt: .now, fileExtension: "m4a") { FileManager.default.fileExists(atPath: $0.path) }
-        settings.store.set(url.path, forKey: "inProgressRecording")
+        settings.store.set(["path": url.path, "pid": Int(getpid())], forKey: "inProgressRecording")
+        let id = UUID()
+        sessionID = id
         let session = try? CaptureSession(url: url, probesTap: settings.store.bool(forKey: "systemAudioConfirmed")) { [weak self] event in
-            Task { @MainActor in self?.handle(event) }
+            Task { @MainActor in self?.handle(event, from: id) }
         }
-        guard let session, (try? session.start()) != nil else {
+        guard let session, (try? await session.start()) != nil else {
+            sessionID = nil
             _ = await session?.finish()
             try? FileManager.default.removeItem(at: url)
             settings.store.removeObject(forKey: "inProgressRecording")
@@ -97,9 +102,12 @@ final class Recorder {
         let since = Date.now
         phase = .recording(since: since)
         activity = ProcessInfo.processInfo.beginActivity(options: .userInitiated, reason: "Recording a call")
-        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+        lastDiskCheck = .now
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick(since: since) }
         }
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
         AccessibilityNotification.Announcement("Recording started").post()
     }
 
@@ -118,15 +126,23 @@ final class Recorder {
     }
 
     func recoverInterruptedRecording() async {
-        guard let path = settings.store.string(forKey: "inProgressRecording") else { return }
+        guard let marker = settings.store.dictionary(forKey: "inProgressRecording"), let path = marker["path"] as? String else { return }
+        if let pid = marker["pid"] as? Int, pid != Int(getpid()),
+           NSRunningApplication(processIdentifier: pid_t(pid))?.bundleIdentifier == Bundle.main.bundleIdentifier {
+            return
+        }
         settings.store.removeObject(forKey: "inProgressRecording")
         let url = URL(filePath: path)
         guard FileManager.default.fileExists(atPath: path) else { return }
-        let duration = try? await AVURLAsset(url: url).load(.duration).seconds
-        guard let duration, duration >= 1 else {
+        if ((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) < 4096 {
             try? FileManager.default.removeItem(at: url)
             return
         }
+        if let duration = try? await AVURLAsset(url: url).load(.duration), duration.seconds < 1 {
+            try? FileManager.default.removeItem(at: url)
+            return
+        }
+        guard phase == .idle else { return }
         lastRecording = url
         notice = .recovered(name: RecordingFile.displayName(of: url))
     }
@@ -144,31 +160,24 @@ final class Recorder {
     }
     #endif
 
-    private func handle(_ event: CaptureEvent) {
+    private func handle(_ event: CaptureEvent, from id: UUID) {
+        guard id == sessionID else { return }
         if case .microphone(let name) = event {
             microphoneName = name
             return
         }
-        if case .systemAudioDenied = event {
-            Task { await discardForMissingSystemAudio() }
+        if event == .systemAudioDenied {
+            Task { await stopForDeniedSystemAudio() }
             return
         }
-        if case .deviceFailed = event {
-            Task { await stop(reason: .audioFailed) }
-            return
-        }
-        Task { await stop(reason: failureReason()) }
+        Task { await stop(reason: event == .deviceFailed ? .audioFailed : failureReason()) }
     }
 
-    private func discardForMissingSystemAudio() async {
-        guard case .recording(let since) = phase, let session, let url = recordingURL else { return }
-        phase = .stopping(since: since)
-        timer?.invalidate()
-        _ = await session.finish()
-        try? FileManager.default.removeItem(at: url)
+    private func stopForDeniedSystemAudio() async {
+        guard let url = recordingURL else { return }
+        await stop()
+        if ((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) < 4096 { try? FileManager.default.removeItem(at: url) }
         notice = .systemAudioDenied
-        finishCleanup()
-        AccessibilityNotification.Announcement(Notice.systemAudioDenied.text).post()
     }
 
     private func finishCleanup() {
@@ -177,6 +186,7 @@ final class Recorder {
         activity = nil
         timer = nil
         session = nil
+        sessionID = nil
         recordingURL = nil
         fallbackFrom = nil
         isSavingToFallback = false
@@ -187,10 +197,13 @@ final class Recorder {
     private func tick(since: Date) {
         guard case .recording = phase else { return }
         elapsed = Int(Date.now.timeIntervalSince(since))
-        guard elapsed % 30 == 0, let url = recordingURL,
-              let space = Self.freeSpace(at: url.deletingLastPathComponent()),
-              space.bytes < Self.minimumFreeBytesWhileRecording
-        else { return }
+        guard Date.now.timeIntervalSince(lastDiskCheck) >= 30, let folder = recordingURL?.deletingLastPathComponent() else { return }
+        lastDiskCheck = .now
+        guard FileManager.default.fileExists(atPath: folder.path), let space = Self.freeSpace(at: folder) else {
+            Task { await stop(reason: failureReason()) }
+            return
+        }
+        guard space.bytes < Self.minimumFreeBytesWhileRecording else { return }
         Task { await stop(reason: .diskFull(volume: space.volume)) }
     }
 
