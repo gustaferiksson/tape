@@ -5,3 +5,4 @@ DerivedData/
 .env
 .DS_Store
 .swiftpm/
+.build-debug/
