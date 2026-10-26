@@ -256,6 +256,8 @@ final class CaptureSession: @unchecked Sendable {
         let input = engine.inputNode
         try input.setVoiceProcessingEnabled(true)
         input.voiceProcessingOtherAudioDuckingConfiguration = AVAudioVoiceProcessingOtherAudioDuckingConfiguration(enableAdvancedDucking: false, duckingLevel: .min)
+        // The voice-processing unit is duplex and needs its output side in the graph to start.
+        engine.mainMixerNode.outputVolume = 0
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else { throw CaptureError("The microphone has no audio format.") }
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, time in
