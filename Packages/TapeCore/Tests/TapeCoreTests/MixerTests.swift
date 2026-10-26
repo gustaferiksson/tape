@@ -3,33 +3,34 @@ import Testing
 @testable import TapeCore
 
 struct MixerTests {
-    @Test func silencePlusSignalIsSignal() {
-        let silence: [Float] = [0, 0, 0]
-        let signal: [Float] = [0.1, -0.2, 0.3]
-        let mixed = silence.withUnsafeBufferPointer { a in
-            signal.withUnsafeBufferPointer { b in
-                Mixer.mix([InterleavedStream(samples: a, channels: 1), InterleavedStream(samples: b, channels: 1)], frames: 3)
+    private func mix(_ streams: [([Float], Int)], frames: Int) -> [Float] {
+        var output = [Float](repeating: 0, count: frames)
+        output.withUnsafeMutableBufferPointer { out in
+            for (samples, channels) in streams {
+                samples.withUnsafeBufferPointer { Mixer.addLoudestChannel(of: InterleavedStream(samples: $0, channels: channels), into: out) }
             }
         }
-        #expect(mixed == signal)
+        return output
     }
 
-    @Test func averagesChannelsWithinAStreamAndSumsStreams() {
-        let stereo: [Float] = [0.2, 0.4, -0.2, 0]
-        let mono: [Float] = [0.1, 0.1]
-        let mixed = stereo.withUnsafeBufferPointer { a in
-            mono.withUnsafeBufferPointer { b in
-                Mixer.mix([InterleavedStream(samples: a, channels: 2), InterleavedStream(samples: b, channels: 1)], frames: 2)
-            }
-        }
-        #expect(abs(mixed[0] - 0.4) < 1e-6)
-        #expect(abs(mixed[1] - 0) < 1e-6)
+    @Test func silencePlusSignalIsSignal() {
+        let signal: [Float] = [0.1, -0.2, 0.3]
+        #expect(mix([([0, 0, 0], 1), (signal, 1)], frames: 3) == signal)
+    }
+
+    @Test func takesTheLoudestChannelSoMultichannelInterfacesKeepTheirLevel() {
+        let eightChannels: [Float] = [0, 0, 0.5, 0, 0, 0, 0, 0.01] + [0, -0.4, 0, 0, 0, 0, 0, 0]
+        #expect(mix([(eightChannels, 8)], frames: 2) == [0.5, -0.4])
+    }
+
+    @Test func sumsStreams() {
+        let mixed = mix([([0.2, 0.4, -0.2, 0], 2), ([0.1, 0.1], 1)], frames: 2)
+        #expect(abs(mixed[0] - 0.5) < 1e-6)
+        #expect(abs(mixed[1] - -0.1) < 1e-6)
     }
 
     @Test func shortStreamLeavesTheRestUntouched() {
-        let short: [Float] = [0.5]
-        let mixed = short.withUnsafeBufferPointer { Mixer.mix([InterleavedStream(samples: $0, channels: 1)], frames: 3) }
-        #expect(mixed == [0.5, 0, 0])
+        #expect(mix([([0.5], 1)], frames: 3) == [0.5, 0, 0])
     }
 
     @Test func limiterKeepsTwoFullScaleInputsBelowCeiling() {

@@ -9,17 +9,17 @@ public struct InterleavedStream {
 }
 
 public enum Mixer {
-    public static func mix(_ streams: [InterleavedStream], frames: Int) -> [Float] {
-        var output = [Float](repeating: 0, count: frames)
-        for stream in streams where stream.channels > 0 {
-            let available = min(frames, stream.samples.count / stream.channels)
-            let scale = 1 / Float(stream.channels)
-            for frame in 0..<available {
-                let start = frame * stream.channels
-                output[frame] += stream.samples[start..<start + stream.channels].reduce(0, +) * scale
+    public static func addLoudestChannel(of stream: InterleavedStream, into output: UnsafeMutableBufferPointer<Float>) {
+        guard stream.channels > 0 else { return }
+        let frames = min(output.count, stream.samples.count / stream.channels)
+        for frame in 0..<frames {
+            var loudest: Float = 0
+            for channel in 0..<stream.channels {
+                let sample = stream.samples[frame * stream.channels + channel]
+                if abs(sample) > abs(loudest) { loudest = sample }
             }
+            output[frame] += loudest
         }
-        return output
     }
 }
 
