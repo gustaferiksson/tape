@@ -117,8 +117,8 @@ private struct UpdateMenuItems: View {
 func menuBarImage(phase: Recorder.Phase, elapsed: Int) -> NSImage {
     let font = NSFont.menuBarFont(ofSize: 0)
     let isIdle = phase == .idle || phase == .starting
-    let symbol = NSImage(systemSymbolName: isIdle ? "recordingtape" : "record.circle", accessibilityDescription: nil)?
-        .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: font.pointSize, weight: .regular))
+    let symbol = NSImage(systemSymbolName: isIdle ? "record.circle" : "record.circle.fill", accessibilityDescription: nil)?
+        .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: font.pointSize, weight: .medium))
     let title = NSAttributedString(
         string: isIdle ? "" : ElapsedTime.clock(elapsed),
         attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: font.pointSize, weight: .regular)]
