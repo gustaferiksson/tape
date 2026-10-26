@@ -38,6 +38,9 @@ private struct TapeMenu: View {
                 .disabled(!recorder.isRecording)
             Text("Recording audio · since \(since.formatted(date: .omitted, time: .shortened))\(recorder.isSavingToFallback ? " · saving to Movies › Tape" : "")")
             Text(recorder.microphoneName.map { "Microphone: \($0)" } ?? "Microphone unavailable")
+            if let notice = recorder.notice { Text(notice.text) }
+            Toggle("Reduce Echo", isOn: Bindable(settings).reducesEcho)
+                .disabled(true)
             Divider()
             Button("Open Recordings Folder", action: openFolder)
             Divider()
@@ -55,6 +58,8 @@ private struct TapeMenu: View {
                     Button("Open Privacy Settings…") { NSWorkspace.shared.open(pane.url) }
                 }
             }
+            Divider()
+            Toggle("Reduce Echo", isOn: Bindable(settings).reducesEcho)
             Divider()
             Button("Show Last Recording in Finder") {
                 if let url = recorder.lastRecording { NSWorkspace.shared.activateFileViewerSelecting([url]) }
@@ -113,8 +118,8 @@ private struct UpdateMenuItems: View {
 func menuBarImage(phase: Recorder.Phase, elapsed: Int) -> NSImage {
     let font = NSFont.menuBarFont(ofSize: 0)
     let isIdle = phase == .idle || phase == .starting
-    let symbol = NSImage(systemSymbolName: isIdle ? "recordingtape" : "record.circle", accessibilityDescription: nil)?
-        .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: font.pointSize, weight: .regular))
+    let symbol = NSImage(systemSymbolName: isIdle ? "record.circle" : "record.circle.fill", accessibilityDescription: nil)?
+        .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: font.pointSize, weight: .medium))
     let title = NSAttributedString(
         string: isIdle ? "" : ElapsedTime.clock(elapsed),
         attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: font.pointSize, weight: .regular)]

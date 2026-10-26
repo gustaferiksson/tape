@@ -25,6 +25,7 @@ public enum Notice: Sendable, Equatable {
     case fellBack(folder: String)
     case noSystemAudio
     case notEnoughSpace(volume: String)
+    case reduceEchoUnavailable
 
     public var text: String {
         switch self {
@@ -39,6 +40,7 @@ public enum Notice: Sendable, Equatable {
         case .fellBack(let folder): "Saved to Movies › Tape. “\(folder)” wasn’t available."
         case .noSystemAudio: "The last recording has no system audio."
         case .notEnoughSpace(let volume): "Not enough space on “\(volume)” to record."
+        case .reduceEchoUnavailable: "Reduce Echo couldn’t start, so this recording doesn’t use it."
         }
     }
 

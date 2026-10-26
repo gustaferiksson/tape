@@ -27,31 +27,32 @@ There is no onboarding window, no notification, and no post-recording window. Re
 |---|---|---|
 | System audio | **Core Audio process tap** (`CATapDescription(monoGlobalTapButExcludeProcesses:)`, Tape's process object from `kAudioHardwarePropertyTranslatePIDToProcessObject`), read through a private aggregate device's IOProc, in both modes | It needs only the "System Audio Recording Only" permission, so an audio recording never shows a *screen* recording prompt. One audio path for both modes |
 | Screen video | `SCStream` from the filter `SCContentSharingPicker` returns, video only | The person's pick is their consent, so no Screen Recording permission row and (to verify) no periodic Sequoia re-approval prompt |
-| Microphone | `AVAudioEngine` input. Voice processing (`setVoiceProcessingEnabled`) when Reduce Echo is on, with `voiceProcessingOtherAudioDuckingConfiguration` set to no advanced ducking and `.min` ducking level | Teams and Zoom are ducked as little as the API allows (`.min` is the minimum, not zero; verify in the spike) |
+| Microphone | Reduce Echo off (default): a sub-device of the tap's aggregate (layer 1). On: an `AVAudioEngine` input with voice processing (`setVoiceProcessingEnabled`), `voiceProcessingOtherAudioDuckingConfiguration` set to no advanced ducking and `.min` ducking level, read through an input-node tap (channel 0, at whatever rate the node gives) | Teams and Zoom are ducked as little as the API allows (`.min` is the minimum, not zero; verify in the spike) |
 | Mix | System audio and mic summed at equal gain, with a peak limiter to prevent clipping. No normalisation or auto-gain in v1 | Predictable. Speech-to-text copes with uneven levels |
-| Sync | The tap and the mic run on different device clocks, which drift apart (tens of ms per hour is typical). Every buffer is stamped in host time (IOProc `inInputTime.mHostTime`, engine `AVAudioTime.hostTime`). The mic is aligned to the tap through a ring buffer keyed on host time and slowly resampled to follow the tap's clock. Gaps (device switch, engine restart) are filled with silence by timestamp, never by appending. The writer session starts at the first mixed sample's host time; `SCStream` video PTS are in the same host clock, so screen and audio line up without offsets | Without this the mic slides out of sync over a long call |
+| Sync | With Reduce Echo on, the tap and the mic run on different device clocks, which drift apart (tens of ms per hour is typical). Every buffer is stamped in host time (IOProc `inInputTime.mHostTime`, engine `AVAudioTime.hostTime`) and goes through its own lock-free `AudioRing`. Both streams are converted to 48 kHz, then `AlignedMix` (TapeCore) places each mic chunk at the output frame its host time maps to, using the latest tap chunk as the anchor. Errors over 50 ms (engine restart, device switch) jump: silence for a gap, dropped frames for an overlap. Smaller errors are smoothed and corrected by slipping one frame (repeat or drop) per chunk once they pass 1 ms, so the mic follows the tap's clock over an hour-long call. Output waits up to 0.5 s for the mic to cover the tap's frames, then carries on with mic silence. Tap gaps are still filled with silence by timestamp, never by appending. For screen mode, the writer session starts at the first mixed sample's host time; `SCStream` video PTS are in the same host clock, so screen and audio line up without offsets | Without this the mic slides out of sync over a long call. Slipping a single frame is inaudible in speech and needs no varispeed resampler |
 | Audio format | AAC, 48 kHz, mono, about 64 kbps (about 30 MB per hour) | Speech for AI summaries. Stereo adds nothing |
 | Audio-only file | `.m4a` | Plays everywhere and is accepted by AI tools |
 | Screen file | `.mov`, HEVC at 30 fps with the cursor, plus the mixed AAC track | The QuickTime-native container, supports fragments |
 | Durability | `AVAssetWriter` with `movieFragmentInterval` of 10 s and `initialMovieFragmentInterval` of 1 s | A crash or power loss loses at most about 10 s (§8). Without the short first fragment, a crash in the first 10 s leaves an unplayable file |
 
-**Build in layers.** Layer 1 is Record Audio → `.m4a` without voice processing: one aggregate device holding the tap *and* the mic as a sub-device, drift compensation on (`kAudioSubTapDriftCompensationKey`, `kAudioSubDeviceDriftCompensationKey`). One IOProc then delivers both sample-aligned on one clock, so layer 1 needs no ring buffer or resampler. Layer 2 moves the mic to the voice-processing engine (VPIO can't sit on that aggregate) and adds the Sync row above. Screen comes after.
+**Build in layers.** Layer 1 is Record Audio → `.m4a` without voice processing: one aggregate device holding the tap *and* the mic as a sub-device, drift compensation on (`kAudioSubTapDriftCompensationKey`, `kAudioSubDeviceDriftCompensationKey`). One IOProc then delivers both sample-aligned on one clock, so layer 1 needs no ring buffer or resampler. Layer 2 moves the mic to the voice-processing engine (VPIO can't sit on that aggregate) and adds the Sync row above. **Built behind Reduce Echo, off by default and labelled experimental, until spikes 3 and 4 pass in a real call:** the aggregate then holds only the tap, clocked on the default output device, and the IOProc reads only the tap's streams (the output device's own input streams are switched off with `kAudioDevicePropertyIOProcStreamUsage`). The engine starts before the tap, and turning Reduce Echo off restores layer 1 exactly. If the engine can't start (for example `AVAudioEngine` start errors -10875/-10876 with an AirPods mic on MacBook speakers), that recording drops to layer 1 into the same file instead of failing. Screen comes after.
 
 **Spikes before building:**
 1. `.m4a` (`AVFileType.m4a`) honours `movieFragmentInterval`. If it doesn't, write a fragmented MPEG-4 audio file (`AVFileType.mp4`, audio only) and name it `.m4a`. Also confirm `finishWriting` on a multi-hour fragmented file stays near 1 s (§3, §8 assume it). **Done:** `.m4a` writes `moof` fragments, and a writer killed at 35 s leaves a playable 31 s file. The `.mp4` fallback isn't needed (AVFoundation reads both to 31 s, though `afinfo` under-reports the `.mp4` one as 1 s). `finishWriting` on a 3 hour file takes about 30 ms and consolidates it to a plain `moov` file. Feeding a running writer a new input sample rate silently truncates audio, so the capture path converts to 48 kHz itself.
 2. Tap permission prompt: when exactly it appears (expected: the first `AudioDeviceStart` on an aggregate containing a tap, asynchronously, with zeros delivered until answered) and how denial shows (§5). **Layer 1 status, unverified on hardware:** the probe (rewriting `kAudioTapPropertyDescription`, expecting `kAudioDevicePermissionsError`) only runs once a previous recording has heard non-zero system audio, because nothing documents what it returns while the prompt is still open. So a denial at the very first prompt is caught only by the after-stop zero check.
-3. **Reduce Echo actually removes other apps' audio.** VPIO's echo reference may be only what Tape itself plays, in which case Teams on speakers isn't cancelled at all. Test with a real Teams call on speakers. If it doesn't work, ship Reduce Echo off (or cut it) rather than colour everyone's voice for nothing.
-4. Tape's voice processing doesn't degrade Teams' or Zoom's own mic input (a forum report says a VP-enabled recorder cut off Zoom's input) and doesn't audibly duck them.
+3. **Reduce Echo actually removes other apps' audio.** (Open: layer 2 is built behind the toggle so this can be tried in a real call.) VPIO's echo reference may be only what Tape itself plays, in which case Teams on speakers isn't cancelled at all. Test with a real Teams call on speakers. If it doesn't work, ship Reduce Echo off (or cut it) rather than colour everyone's voice for nothing.
+4. (Open, as 3.) Tape's voice processing doesn't degrade Teams' or Zoom's own mic input (a forum report says a VP-enabled recorder cut off Zoom's input) and doesn't audibly duck them.
 
 ## 3. Menu bar label
 
 | State | Label | Accessibility description |
 |---|---|---|
-| Idle | `recordingtape` | "Tape" |
-| Starting (prompts or writer setup in progress) | `recordingtape`, unchanged | "Tape, starting" |
-| Recording | `record.circle` + `12:34` | "Tape, recording, 12 minutes" |
-| Stopping (finalising, usually under 1 s) | `record.circle` + frozen time | "Tape, saving" |
+| Idle | `record.circle` | "Tape" |
+| Starting (prompts or writer setup in progress) | `record.circle`, unchanged | "Tape, starting" |
+| Recording | `record.circle.fill` + `12:34` | "Tape, recording, 12 minutes" |
+| Stopping (finalising, usually under 1 s) | `record.circle.fill` + frozen time | "Tape, saving" |
 
+- Symbols use `.medium` weight to match the optical weight of the system extras (Wi-Fi, battery).
 - The recording label is drawn into a template `NSImage` (symbol, 4 pt gap, time), as tidy and spaces do. It's monochrome like every extra: no red dot, so it never imitates the system's privacy indicators (§10).
 - Time format: `m:ss` under an hour, `h:mm:ss` after. Monospaced digits so the item doesn't jitter. The image redraws once a second.
 - The accessibility description updates once a minute, not every second, so VoiceOver isn't flooded.
@@ -79,6 +80,8 @@ Why a separate window rather than a Stop row in Settings: Settings holds rarely 
 | *Status line* (disabled text, optional) | At most one, see the table below |
 | *Status action* (optional) | For example "Open Privacy Settings…" |
 | ── | |
+| Reduce Echo | Checkmark toggle, the same setting as in Settings (§12) |
+| ── | |
 | Show Last Recording in Finder | Selects the file. Disabled when there's none, or the file is gone |
 | Open Recordings Folder | |
 | ── | |
@@ -97,6 +100,7 @@ Status lines, highest priority first. Each one persists until the next recording
 | Last recording fell back to the default folder | Saved to Movies › Tape. "*Folder*" wasn't available. | |
 | Last recording had no system audio | The last recording has no system audio. | Open Privacy Settings… (§5) |
 | Not enough disk space to start | Not enough space on "*Volume*" to record. | |
+| Reduce Echo couldn't start for the last recording | Reduce Echo couldn't start, so this recording doesn't use it. | |
 
 ### Recording
 
@@ -105,6 +109,8 @@ Status lines, highest priority first. Each one persists until the next recording
 | Stop Recording | First item, so one click on the label and one on Stop ends it |
 | Recording audio · since 14:03 | Disabled. Screen mode: `Recording "Microsoft Teams" and audio` (window, app or display name from the picker) |
 | Microphone: AirPods Pro | Disabled. Shows the live device (the system default input), or "Microphone unavailable" |
+| *Status line* (disabled text, optional) | Only "Reduce Echo couldn't start, so this recording doesn't use it." It stays as the idle status line after Stop |
+| Reduce Echo | Disabled checkmark: shows the setting, which applies from the next recording |
 | ── | |
 | Open Recordings Folder | |
 | ── | |
@@ -173,8 +179,9 @@ Rule: **never stop because of a device change. Stop only when there's nothing le
 | Shared content changed from the system screen-sharing menu (screen mode) | `contentSharingPicker(_:didUpdateWith:for:)` fires. Apply it with `updateContentFilter`; the output size stays fixed and the new content is letterboxed | The "Recording …" line shows the new name |
 | Picked window closed or app quit (screen mode) | Finalise and save. This is also the natural end when the Teams meeting window closes | "Recording stopped: the window closed." |
 | Picked display disconnected | Finalise and save | "Recording stopped: the display was disconnected." |
-| The default input changes or is unplugged | Switch to the new default, insert silence for the gap so audio stays in sync | Mic line shows the new device |
-| Output device changes | The tap is global, so capture continues. The voice-processing engine restarts on `AVAudioEngineConfigurationChange`, with a silence-filled gap | None |
+| The default input changes or is unplugged | Switch to the new default, insert silence for the gap so audio stays in sync. With Reduce Echo on, the engine is rebuilt (0.5 s apart, up to 4 tries); if it stays down the recording continues without the mic. It doesn't fall back to the aggregate's mic: that means switching the mix path and the device listeners mid-stream, and the engine usually stays down because the input itself is gone, which the aggregate can't use either | Mic line shows the new device, or "Microphone unavailable" |
+| Reduce Echo on, but the voice-processing engine fails to start | Record without it: the mic joins the tap's aggregate (layer 1) and writes to the same file | "Reduce Echo couldn't start, so this recording doesn't use it." while recording and afterwards |
+| Output device changes | The tap is global, so capture continues. With Reduce Echo on, the tap's aggregate is rebuilt on the new output and the voice-processing engine restarts on `AVAudioEngineConfigurationChange`, each with a silence-filled gap | None |
 | Idle sleep | Prevented while recording (`ProcessInfo.beginActivity` with `.idleSystemSleepDisabled`). The display may still sleep | n/a |
 | Forced sleep (lid closed without an external display, Apple menu › Sleep) | Finalise on `willSleep`. No auto-resume on wake | "Recording stopped when your Mac went to sleep." |
 | Screen locked | Keep recording. Calls continue while locked | n/a |
@@ -228,7 +235,7 @@ Two tabs, grouped `Form`s, rinse's layout.
 | Section | Control | Notes |
 |---|---|---|
 | Recordings | Save to: folder pop-up showing "Tape (Movies)", with Choose… and Show in Finder | Applies from the next recording. Desktop, Documents, Downloads, external drives and network volumes each trigger one macOS folder-access prompt on first write. Tape triggers it right after Choose… (a test write), so it never appears mid-call |
-| Microphone | Toggle: Reduce Echo, **on by default**. Description: "Removes other people's voices from your microphone when you're on speakers." | See §14 |
+| Microphone | Toggle: Reduce Echo, **off by default** while spikes 3 and 4 are open. Description: "Removes other people's voices from your microphone when you're on speakers. Experimental." Footer: "Applies from the next recording." | See §14 |
 | Permissions | Microphone row, System Audio row (§5) | tinecast `PermissionRow` style |
 | (none) | Launch at login | rinse's `SMAppService` block, including the "Approval needed" state |
 | Updates | rinse's Updates section unchanged | |
@@ -250,8 +257,8 @@ Removed or never added: Show menu bar icon (§3), audio format and quality, file
 | Situation | What happens | Tape's handling |
 |---|---|---|
 | Teams and Tape both open the mic | macOS shares input devices. Tape never changes the system default input or output, so Teams' input is untouched | None needed |
-| You're on speakers | Without echo cancellation, Tape's mic hears the far end from the speakers. The system track already has it, so the mix doubles every remote voice with a small delay, which hurts transcription | Reduce Echo on by default. Voice processing uses the output as its reference |
-| You're on headphones | No echo. Voice processing is harmless but slightly colours your voice | People can turn Reduce Echo off |
+| You're on speakers | Without echo cancellation, Tape's mic hears the far end from the speakers. The system track already has it, so the mix doubles every remote voice with a small delay, which hurts transcription | Turn on Reduce Echo (opt-in, experimental). Voice processing uses the output as its reference |
+| You're on headphones | No echo. Voice processing is harmless but slightly colours your voice | Leave Reduce Echo off |
 | Voice processing would duck Teams | Ducking is disabled (§2) | n/a |
 | Teams' own voice isolation or noise suppression | Affects only what Teams *sends*. Tape gets the raw mic. With voice processing on, macOS's Mic Mode (Control Center) also applies to Tape, where people can choose Voice Isolation themselves | No Tape UI |
 | AirPods already used by Teams as mic | Already in HFP (low quality) because of Teams. Tape opening the same mic changes nothing | None |

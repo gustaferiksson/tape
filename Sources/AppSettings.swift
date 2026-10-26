@@ -20,10 +20,13 @@ final class AppSettings {
 
     var customFolder: URL? { didSet { store.set(customFolder?.path, forKey: "saveFolder") } }
 
+    var reducesEcho: Bool { didSet { store.set(reducesEcho, forKey: "reduceEcho") } }
+
     var saveFolder: URL { customFolder ?? Self.defaultFolder }
 
     init(store: UserDefaults) {
         self.store = store
         customFolder = store.string(forKey: "saveFolder").map { URL(filePath: $0, directoryHint: .isDirectory) }
+        reducesEcho = store.bool(forKey: "reduceEcho")
     }
 }

@@ -12,6 +12,8 @@ struct NoticeTests {
     @Test func stopReasonsNameTheVolume() {
         #expect(Notice.stopped(.diskFull(volume: "Macintosh HD")).text == "Recording stopped: “Macintosh HD” is full.")
         #expect(Notice.recovered(name: "Tape 2026-10-26 at 14.03.05").text == "Recovered “Tape 2026-10-26 at 14.03.05”.")
+        #expect(Notice.reduceEchoUnavailable.text == "Reduce Echo couldn’t start, so this recording doesn’t use it.")
+        #expect(Notice.reduceEchoUnavailable.privacyPane == nil)
     }
 
     @Test func privacyPaneURLs() {
