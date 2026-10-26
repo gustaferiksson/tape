@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  build:
+    name: Build & test (unsigned)
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Install build tools
+        run: brew install xcodegen librsvg
+
+      - name: Build (ad-hoc, unsigned)
+        run: ./build.sh
+
+      - name: Test
+        run: swift test --package-path Packages/TapeCore
+
+      - name: Verify the bundle
+        run: |
+          set -euo pipefail
+          plist=dist/Tape.app/Contents/Info.plist
+          test -f dist/Tape.app/Contents/Resources/Assets.car
+          name=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIconName" "$plist")
+          [ "$name" = "AppIcon" ] || { echo "CFBundleIconName is '$name', expected AppIcon"; exit 1; }
+          /usr/libexec/PlistBuddy -c "Print :NSMicrophoneUsageDescription" "$plist"
+          /usr/libexec/PlistBuddy -c "Print :NSAudioCaptureUsageDescription" "$plist"
+          codesign -d --entitlements - --xml dist/Tape.app | grep -q "com.apple.security.device.audio-input"

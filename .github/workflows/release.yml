@@ -1,0 +1,28 @@
+name: Release
+
+on:
+  push:
+    tags: [ 'v*' ]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    uses: gustaferiksson/macos-release/.github/workflows/release.yml@main
+    secrets: inherit
+    with:
+      # AppUpdater downloads Tape-<version>.zip, and the shared workflow names the zip after `name`.
+      name: Tape
+      app: dist/Tape.app
+      cask: tape
+      runner: xcode-27
+      signed_by_build: true
+      build: |
+        brew install xcodegen librsvg
+        CODE_SIGN_IDENTITY="Developer ID Application" DEVELOPMENT_TEAM=82K3YC8HVF \
+          MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$BUILD" ./build.sh
