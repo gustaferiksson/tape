@@ -33,6 +33,7 @@ final class CaptureSession: @unchecked Sendable {
     private let processingQueue = DispatchQueue(label: "dev.gustaf.tape.processing", qos: .userInitiated)
     private let ring = AudioRing(slots: 256, framesPerSlot: 8192)
     private let microphoneRing: AudioRing?
+    private let microphoneWriter = Mutex(())
     private let microphonePath: MicrophonePath
     private let deviceRate = Atomic<UInt64>(0)
     private let heardSystemAudio = Atomic<Bool>(false)
@@ -262,8 +263,9 @@ final class CaptureSession: @unchecked Sendable {
         guard nodeFormat.sampleRate > 0, nodeFormat.channelCount > 0,
               let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: nodeFormat.sampleRate, channels: 1, interleaved: false)
         else { throw CaptureError("The microphone has no audio format.") }
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, time in
-            Self.capture(buffer, at: time, into: microphoneRing)
+        // A stopped engine's tap block can still be in flight while the next engine's starts, and the ring allows one producer.
+        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, time in
+            self?.microphoneWriter.withLock { _ in Self.capture(buffer, at: time, into: microphoneRing) }
         }
         engine.prepare()
         try engine.start()
