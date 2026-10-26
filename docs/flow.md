@@ -38,11 +38,10 @@ There is no onboarding window, no notification, and no post-recording window. Re
 **Build in layers.** Layer 1 is Record Audio → `.m4a` without voice processing: one aggregate device holding the tap *and* the mic as a sub-device, drift compensation on (`kAudioSubTapDriftCompensationKey`, `kAudioSubDeviceDriftCompensationKey`). One IOProc then delivers both sample-aligned on one clock, so layer 1 needs no ring buffer or resampler. Layer 2 moves the mic to the voice-processing engine (VPIO can't sit on that aggregate) and adds the Sync row above. Screen comes after.
 
 **Spikes before building:**
-1. `.m4a` (`AVFileType.m4a`) honours `movieFragmentInterval`. If it doesn't, write a fragmented MPEG-4 audio file (`AVFileType.mp4`, audio only) and name it `.m4a`. Also confirm `finishWriting` on a multi-hour fragmented file stays near 1 s (§3, §8 assume it).
-2. Tap permission prompt: when exactly it appears (expected: the first `AudioDeviceStart` on an aggregate containing a tap, asynchronously, with zeros delivered until answered) and how denial shows (§5).
+1. `.m4a` (`AVFileType.m4a`) honours `movieFragmentInterval`. If it doesn't, write a fragmented MPEG-4 audio file (`AVFileType.mp4`, audio only) and name it `.m4a`. Also confirm `finishWriting` on a multi-hour fragmented file stays near 1 s (§3, §8 assume it). **Done:** `.m4a` writes `moof` fragments, and a writer killed at 35 s leaves a playable 31 s file. The `.mp4` fallback is worse (QuickTime tools see only the first 1 s fragment). `finishWriting` on a 3 hour file takes about 30 ms and consolidates it to a plain `moov` file. Feeding a running writer a new input sample rate silently truncates audio, so the capture path converts to 48 kHz itself.
+2. Tap permission prompt: when exactly it appears (expected: the first `AudioDeviceStart` on an aggregate containing a tap, asynchronously, with zeros delivered until answered) and how denial shows (§5). **Layer 1 status, unverified on hardware:** the probe (rewriting `kAudioTapPropertyDescription`, expecting `kAudioDevicePermissionsError`) only runs once a previous recording has heard non-zero system audio, because nothing documents what it returns while the prompt is still open. So a denial at the very first prompt is caught only by the after-stop zero check.
 3. **Reduce Echo actually removes other apps' audio.** VPIO's echo reference may be only what Tape itself plays, in which case Teams on speakers isn't cancelled at all. Test with a real Teams call on speakers. If it doesn't work, ship Reduce Echo off (or cut it) rather than colour everyone's voice for nothing.
 4. Tape's voice processing doesn't degrade Teams' or Zoom's own mic input (a forum report says a VP-enabled recorder cut off Zoom's input) and doesn't audibly duck them.
-5. VPIO with a pinned, non-default mic works (reports say VPIO is only reliable with the default devices).
 
 ## 3. Menu bar label
 
@@ -105,7 +104,7 @@ Status lines, highest priority first. Each one persists until the next recording
 |---|---|
 | Stop Recording | First item, so one click on the label and one on Stop ends it |
 | Recording audio · since 14:03 | Disabled. Screen mode: `Recording "Microsoft Teams" and audio` (window, app or display name from the picker) |
-| Microphone: AirPods Pro | Disabled. Shows the live device, and "(fell back from *X*)" after a fallback (§7) |
+| Microphone: AirPods Pro | Disabled. Shows the live device (the system default input), or "Microphone unavailable" |
 | ── | |
 | Open Recordings Folder | |
 | ── | |
@@ -174,8 +173,7 @@ Rule: **never stop because of a device change. Stop only when there's nothing le
 | Shared content changed from the system screen-sharing menu (screen mode) | `contentSharingPicker(_:didUpdateWith:for:)` fires. Apply it with `updateContentFilter`; the output size stays fixed and the new content is letterboxed | The "Recording …" line shows the new name |
 | Picked window closed or app quit (screen mode) | Finalise and save. This is also the natural end when the Teams meeting window closes | "Recording stopped: the window closed." |
 | Picked display disconnected | Finalise and save | "Recording stopped: the display was disconnected." |
-| Mic set to System Default, and the default changes or is unplugged | Switch to the new default, insert silence for the gap so audio stays in sync | Mic line shows the new device |
-| Pinned mic unplugged | Fall back to the system default. Never stop. The setting keeps the pinned device for when it returns | "Microphone: MacBook Pro Microphone (fell back from Jabra)" |
+| The default input changes or is unplugged | Switch to the new default, insert silence for the gap so audio stays in sync | Mic line shows the new device |
 | Output device changes | The tap is global, so capture continues. The voice-processing engine restarts on `AVAudioEngineConfigurationChange`, with a silence-filled gap | None |
 | Idle sleep | Prevented while recording (`ProcessInfo.beginActivity` with `.idleSystemSleepDisabled`). The display may still sleep | n/a |
 | Forced sleep (lid closed without an external display, Apple menu › Sleep) | Finalise on `willSleep`. No auto-resume on wake | "Recording stopped when your Mac went to sleep." |
@@ -230,7 +228,6 @@ Two tabs, grouped `Form`s, rinse's layout.
 | Section | Control | Notes |
 |---|---|---|
 | Recordings | Save to: folder pop-up showing "Tape (Movies)", with Choose… and Show in Finder | Applies from the next recording. Desktop, Documents, Downloads, external drives and network volumes each trigger one macOS folder-access prompt on first write. Tape triggers it right after Choose… (a test write), so it never appears mid-call |
-| Microphone | Picker: "System Default (*current device*)", then the input devices | Default follows system. Footer: "Bluetooth headphones switch to lower audio quality while their microphone is in use." Applies from the next recording |
 | Microphone | Toggle: Reduce Echo, **on by default**. Description: "Removes other people's voices from your microphone when you're on speakers." | See §14 |
 | Permissions | Microphone row, System Audio row (§5) | tinecast `PermissionRow` style |
 | (none) | Launch at login | rinse's `SMAppService` block, including the "Approval needed" state |
@@ -258,7 +255,7 @@ Removed or never added: Show menu bar icon (§3), audio format and quality, file
 | Voice processing would duck Teams | Ducking is disabled (§2) | n/a |
 | Teams' own voice isolation or noise suppression | Affects only what Teams *sends*. Tape gets the raw mic. With voice processing on, macOS's Mic Mode (Control Center) also applies to Tape, where people can choose Voice Isolation themselves | No Tape UI |
 | AirPods already used by Teams as mic | Already in HFP (low quality) because of Teams. Tape opening the same mic changes nothing | None |
-| AirPods are output, but Teams uses another mic, and AirPods are the system default input | Tape opening the AirPods mic drops AirPods to HFP mid-call | Settings footer. Pin the mic in Settings. Not auto-detected in v1 |
+| AirPods are output, but Teams uses another mic, and AirPods are the system default input | Tape opening the AirPods mic drops AirPods to HFP mid-call | Not handled in v1: Tape always uses the system default input. Change the default input in System Settings › Sound |
 | Teams muted | **Tape still records your mic.** Tape doesn't know about Teams' mute | Called out on the About tab and in the README. Not in the menu |
 | System sounds, other apps' audio | Recorded too, because the tap covers all processes except Tape | Per-app audio is out of scope |
 
@@ -280,3 +277,4 @@ Removed or never added: Show menu bar icon (§3), audio format and quality, file
 - System audio through a Core Audio process tap; ScreenCaptureKit only for screen video via the system picker.
 - Unexpected stops are shown passively in the menu (§4, §7). No notifications.
 - Default folder `~/Movies/Tape`.
+- Tape always records the system default input. There's no microphone picker in v1: it follows whatever System Settings › Sound uses, including changes mid-recording.

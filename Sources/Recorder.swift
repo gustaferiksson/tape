@@ -153,6 +153,10 @@ final class Recorder {
             Task { await discardForMissingSystemAudio() }
             return
         }
+        if case .deviceFailed = event {
+            Task { await stop(reason: .audioFailed) }
+            return
+        }
         Task { await stop(reason: failureReason()) }
     }
 

@@ -5,7 +5,8 @@ import TapeCore
 enum CaptureEvent: Sendable {
     case microphone(String?)
     case systemAudioDenied
-    case failed
+    case deviceFailed
+    case writeFailed
 }
 
 struct CaptureError: LocalizedError {
@@ -151,7 +152,7 @@ final class CaptureSession: @unchecked Sendable {
             do {
                 try startAggregate()
             } catch {
-                onEvent(.failed)
+                onEvent(.deviceFailed)
             }
         }
         var address = Self.address(kAudioHardwarePropertyDefaultInputDevice)
@@ -240,7 +241,7 @@ final class CaptureSession: @unchecked Sendable {
         else { return }
         guard input.append(sample) else {
             isFinished = true
-            onEvent(.failed)
+            onEvent(.writeFailed)
             return
         }
     }
