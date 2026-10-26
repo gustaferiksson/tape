@@ -47,7 +47,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard recorder.isActive else { return .terminateNow }
         Task { [recorder] in
             await withTaskGroup(of: Void.self) { group in
-                group.addTask { await recorder.stop() }
+                group.addTask {
+                    await recorder.stop()
+                    while await recorder.isActive { try? await Task.sleep(for: .milliseconds(50)) }
+                }
                 group.addTask { try? await Task.sleep(for: .seconds(5)) }
                 await group.next()
                 group.cancelAll()

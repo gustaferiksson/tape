@@ -80,7 +80,7 @@ struct GeneralSettings: View {
             }
         }
         .formStyle(.grouped)
-        .frame(height: 320)
+        .frame(height: 340)
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             loginStatus = SMAppService.mainApp.status
         }
