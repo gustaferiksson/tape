@@ -34,7 +34,7 @@ final class CaptureSession: @unchecked Sendable {
     private let ring = AudioRing(slots: 256, framesPerSlot: 8192)
     private let microphoneRing: AudioRing?
     private let microphoneWriter = Mutex(())
-    private let microphonePath: MicrophonePath
+    private var microphonePath: MicrophonePath
     private let deviceRate = Atomic<UInt64>(0)
     private let heardSystemAudio = Atomic<Bool>(false)
     private let writer: AVAssetWriter
@@ -90,19 +90,26 @@ final class CaptureSession: @unchecked Sendable {
         self.onEvent = onEvent
     }
 
-    func start() async throws {
-        try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, any Error>) in
+    func start() async throws -> MicrophonePath {
+        try await withCheckedThrowingContinuation { (done: CheckedContinuation<MicrophonePath, any Error>) in
             controlQueue.async { [self] in
                 do {
                     guard writer.startWriting() else { throw writer.error ?? CaptureError("Couldn’t create the file.") }
                     writer.startSession(atSourceTime: .zero)
+                    if microphonePath == .voiceProcessing {
+                        do {
+                            try startMicrophone()
+                        } catch {
+                            stopMicrophone()
+                            microphonePath = .aggregate
+                        }
+                    }
                     processingQueue.sync { startDraining() }
-                    if microphonePath == .voiceProcessing { try startMicrophone() }
                     tap = try Self.makeTap()
                     try startAggregate(includeMicrophone: microphonePath == .aggregate)
                     listenForDefaultDevices()
                     if probesTap { scheduleProbes() }
-                    done.resume()
+                    done.resume(returning: microphonePath)
                 } catch {
                     done.resume(throwing: error)
                 }

@@ -38,6 +38,7 @@ private struct TapeMenu: View {
                 .disabled(!recorder.isRecording)
             Text("Recording audio · since \(since.formatted(date: .omitted, time: .shortened))\(recorder.isSavingToFallback ? " · saving to Movies › Tape" : "")")
             Text(recorder.microphoneName.map { "Microphone: \($0)" } ?? "Microphone unavailable")
+            if let notice = recorder.notice { Text(notice.text) }
             Toggle("Reduce Echo", isOn: Bindable(settings).reducesEcho)
                 .disabled(true)
             Divider()

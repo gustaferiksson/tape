@@ -35,7 +35,7 @@ There is no onboarding window, no notification, and no post-recording window. Re
 | Screen file | `.mov`, HEVC at 30 fps with the cursor, plus the mixed AAC track | The QuickTime-native container, supports fragments |
 | Durability | `AVAssetWriter` with `movieFragmentInterval` of 10 s and `initialMovieFragmentInterval` of 1 s | A crash or power loss loses at most about 10 s (§8). Without the short first fragment, a crash in the first 10 s leaves an unplayable file |
 
-**Build in layers.** Layer 1 is Record Audio → `.m4a` without voice processing: one aggregate device holding the tap *and* the mic as a sub-device, drift compensation on (`kAudioSubTapDriftCompensationKey`, `kAudioSubDeviceDriftCompensationKey`). One IOProc then delivers both sample-aligned on one clock, so layer 1 needs no ring buffer or resampler. Layer 2 moves the mic to the voice-processing engine (VPIO can't sit on that aggregate) and adds the Sync row above. **Built behind Reduce Echo, off by default and labelled experimental, until spikes 3 and 4 pass in a real call:** the aggregate then holds only the tap, clocked on the default output device, and the IOProc reads only the tap's streams (the output device's own input streams are switched off with `kAudioDevicePropertyIOProcStreamUsage`). The engine starts before the tap, and turning Reduce Echo off restores layer 1 exactly. Screen comes after.
+**Build in layers.** Layer 1 is Record Audio → `.m4a` without voice processing: one aggregate device holding the tap *and* the mic as a sub-device, drift compensation on (`kAudioSubTapDriftCompensationKey`, `kAudioSubDeviceDriftCompensationKey`). One IOProc then delivers both sample-aligned on one clock, so layer 1 needs no ring buffer or resampler. Layer 2 moves the mic to the voice-processing engine (VPIO can't sit on that aggregate) and adds the Sync row above. **Built behind Reduce Echo, off by default and labelled experimental, until spikes 3 and 4 pass in a real call:** the aggregate then holds only the tap, clocked on the default output device, and the IOProc reads only the tap's streams (the output device's own input streams are switched off with `kAudioDevicePropertyIOProcStreamUsage`). The engine starts before the tap, and turning Reduce Echo off restores layer 1 exactly. If the engine can't start (for example `AVAudioEngine` start errors -10875/-10876 with an AirPods mic on MacBook speakers), that recording drops to layer 1 into the same file instead of failing. Screen comes after.
 
 **Spikes before building:**
 1. `.m4a` (`AVFileType.m4a`) honours `movieFragmentInterval`. If it doesn't, write a fragmented MPEG-4 audio file (`AVFileType.mp4`, audio only) and name it `.m4a`. Also confirm `finishWriting` on a multi-hour fragmented file stays near 1 s (§3, §8 assume it). **Done:** `.m4a` writes `moof` fragments, and a writer killed at 35 s leaves a playable 31 s file. The `.mp4` fallback isn't needed (AVFoundation reads both to 31 s, though `afinfo` under-reports the `.mp4` one as 1 s). `finishWriting` on a 3 hour file takes about 30 ms and consolidates it to a plain `moov` file. Feeding a running writer a new input sample rate silently truncates audio, so the capture path converts to 48 kHz itself.
@@ -100,6 +100,7 @@ Status lines, highest priority first. Each one persists until the next recording
 | Last recording fell back to the default folder | Saved to Movies › Tape. "*Folder*" wasn't available. | |
 | Last recording had no system audio | The last recording has no system audio. | Open Privacy Settings… (§5) |
 | Not enough disk space to start | Not enough space on "*Volume*" to record. | |
+| Reduce Echo couldn't start for the last recording | Reduce Echo couldn't start, so this recording doesn't use it. | |
 
 ### Recording
 
@@ -108,6 +109,7 @@ Status lines, highest priority first. Each one persists until the next recording
 | Stop Recording | First item, so one click on the label and one on Stop ends it |
 | Recording audio · since 14:03 | Disabled. Screen mode: `Recording "Microsoft Teams" and audio` (window, app or display name from the picker) |
 | Microphone: AirPods Pro | Disabled. Shows the live device (the system default input), or "Microphone unavailable" |
+| *Status line* (disabled text, optional) | Only "Reduce Echo couldn't start, so this recording doesn't use it." It stays as the idle status line after Stop |
 | Reduce Echo | Disabled checkmark: shows the setting, which applies from the next recording |
 | ── | |
 | Open Recordings Folder | |
@@ -177,7 +179,8 @@ Rule: **never stop because of a device change. Stop only when there's nothing le
 | Shared content changed from the system screen-sharing menu (screen mode) | `contentSharingPicker(_:didUpdateWith:for:)` fires. Apply it with `updateContentFilter`; the output size stays fixed and the new content is letterboxed | The "Recording …" line shows the new name |
 | Picked window closed or app quit (screen mode) | Finalise and save. This is also the natural end when the Teams meeting window closes | "Recording stopped: the window closed." |
 | Picked display disconnected | Finalise and save | "Recording stopped: the display was disconnected." |
-| The default input changes or is unplugged | Switch to the new default, insert silence for the gap so audio stays in sync. With Reduce Echo on, the engine is rebuilt (0.5 s apart, up to 4 tries); if it stays down the recording continues without the mic | Mic line shows the new device, or "Microphone unavailable" |
+| The default input changes or is unplugged | Switch to the new default, insert silence for the gap so audio stays in sync. With Reduce Echo on, the engine is rebuilt (0.5 s apart, up to 4 tries); if it stays down the recording continues without the mic. It doesn't fall back to the aggregate's mic: that means switching the mix path and the device listeners mid-stream, and the engine usually stays down because the input itself is gone, which the aggregate can't use either | Mic line shows the new device, or "Microphone unavailable" |
+| Reduce Echo on, but the voice-processing engine fails to start | Record without it: the mic joins the tap's aggregate (layer 1) and writes to the same file | "Reduce Echo couldn't start, so this recording doesn't use it." while recording and afterwards |
 | Output device changes | The tap is global, so capture continues. With Reduce Echo on, the tap's aggregate is rebuilt on the new output and the voice-processing engine restarts on `AVAudioEngineConfigurationChange`, each with a silence-filled gap | None |
 | Idle sleep | Prevented while recording (`ProcessInfo.beginActivity` with `.idleSystemSleepDisabled`). The display may still sleep | n/a |
 | Forced sleep (lid closed without an external display, Apple menu › Sleep) | Finalise on `willSleep`. No auto-resume on wake | "Recording stopped when your Mac went to sleep." |
