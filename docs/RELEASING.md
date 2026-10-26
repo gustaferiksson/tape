@@ -25,7 +25,7 @@ number. The updater depends on three things staying in lockstep: the repo `gusta
 ## One-time setup
 
 1. Create the GitHub repo `gustaferiksson/tape` and push `main`. Releases must be public for the updater to see them.
-2. Add `Casks/tape.rb` to `gustaferiksson/homebrew-tap` (copy `Casks/amped.rb`, placeholder `version`/`sha256`).
+2. Add `Casks/tape.rb` to `gustaferiksson/homebrew-tap` (copy `Casks/rinse.rb`, placeholder `version`/`sha256`).
    The workflow only rewrites those two lines and fails if the file is missing.
 3. Add the secrets in the tape repo (same values as amped's):
 
