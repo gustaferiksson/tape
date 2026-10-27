@@ -106,7 +106,7 @@ enum MenuSnapshot {
                 print("  \(outline(of: item))")
             }
             for (appearance, suffix) in [(NSAppearance.Name.aqua, "light"), (.darkAqua, "dark")] {
-                let background = menuBackground(rows: statusMenu.menu.items.compactMap { $0.view ?? (imageVisibility(of: $0) == "image hidden" ? nil : $0.image.map(imageView)) })
+                let background = menuBackground(rows: statusMenu.menu.items.compactMap(row(for:)))
                 let window = UnconstrainedWindow(contentRect: background.frame, styleMask: [.borderless], backing: .buffered, defer: false)
                 window.contentView = background
                 window.appearance = NSAppearance(named: appearance)
@@ -126,6 +126,12 @@ enum MenuSnapshot {
             item.image == nil ? nil : imageVisibility(of: item),
         ].compactMap { $0 }
         return "[\(kind)] \(item.title)\(details.isEmpty ? "" : " (\(details.joined(separator: ", ")))")"
+    }
+
+    private static func row(for item: NSMenuItem) -> NSView? {
+        if let view = item.view { return view }
+        if #available(macOS 27, *), item.preferredImageVisibility == .hidden { return nil }
+        return item.image.map(imageView)
     }
 
     private static func imageVisibility(of item: NSMenuItem) -> String {
