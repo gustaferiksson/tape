@@ -56,9 +56,10 @@ final class RecentRecordings {
         let listed = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey], options: .skipsHiddenFiles)) ?? []
         let candidates = Set((listed + [last].compactMap { $0 }).map(\.standardizedFileURL)).subtracting([current?.standardizedFileURL].compactMap { $0 })
         let newest = candidates
+            .sorted { $0.lastPathComponent > $1.lastPathComponent }
+            .lazy
             .compactMap { url in RecordingFile.startDate(of: url).map { (url: url, startedAt: $0) } }
             .filter { FileManager.default.fileExists(atPath: $0.url.path) }
-            .sorted { $0.startedAt > $1.startedAt }
             .prefix(limit)
         var items: [Item] = []
         var durations: [URL: CachedDuration] = [:]
