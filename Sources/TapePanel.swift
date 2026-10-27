@@ -140,36 +140,44 @@ private struct RecordButton: View {
     let recorder: Recorder
 
     var body: some View {
-        if recorder.startedAt == nil {
-            Button { Task { await recorder.start() } } label: {
-                Label(recorder.phase == .starting ? "Starting…" : "Record Audio", systemImage: "record.circle.fill")
-                    .font(.title3)
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                    .contentShape(.capsule)
-            }
-            .buttonStyle(.plain)
-            .glassEffect(.regular.tint(.red).interactive(), in: .capsule)
-            .keyboardShortcut(.defaultAction)
-            .disabled(recorder.phase == .starting)
-        } else {
-            Button {
-                guard recorder.elapsed > 0 else { return }
-                Task { await recorder.stop() }
-            } label: {
-                HStack {
-                    Label(recorder.isRecording ? "Stop Recording" : "Saving…", systemImage: "stop.fill")
-                    Spacer()
-                    Text(ElapsedTime.clock(recorder.elapsed)).monospacedDigit()
+        Button(action: toggle) {
+            HStack {
+                Label {
+                    Text(title)
+                } icon: {
+                    Image(systemName: recorder.startedAt == nil ? "record.circle.fill" : "stop.fill")
+                        .foregroundStyle(.red)
                 }
-                .frame(minHeight: 24)
+                if recorder.startedAt != nil {
+                    Spacer()
+                    Text(ElapsedTime.clock(recorder.elapsed))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
             }
-            .buttonStyle(.glass)
-            .controlSize(.extraLarge)
-            .keyboardShortcut(.defaultAction)
-            .disabled(!recorder.isRecording)
-            .accessibilityLabel(recorder.isRecording ? "Stop Recording" : "Saving")
-            .accessibilityValue(ElapsedTime.spoken(recorder.elapsed))
+            .font(.title3)
+            .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: .capsule)
+        .keyboardShortcut(.defaultAction)
+        .disabled(recorder.startedAt == nil ? recorder.phase == .starting : !recorder.isRecording)
+        .accessibilityLabel(title)
+        .accessibilityValue(recorder.startedAt == nil ? "" : ElapsedTime.spoken(recorder.elapsed))
+    }
+
+    private var title: String {
+        if recorder.startedAt != nil { return recorder.isRecording ? "Stop Recording" : "Saving…" }
+        return recorder.phase == .starting ? "Starting…" : "Record Audio"
+    }
+
+    private func toggle() {
+        if recorder.startedAt == nil {
+            Task { await recorder.start() }
+        } else if recorder.elapsed > 0 {
+            Task { await recorder.stop() }
         }
     }
 }

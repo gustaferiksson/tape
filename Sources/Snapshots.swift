@@ -113,6 +113,41 @@ enum PanelSnapshot {
     }
 }
 
+// Opens the real MenuBarExtra panel invisibly via the private _requestExpandedInterfaceSession (macOS 27) and prints its views and glass layers.
+@MainActor
+enum PanelHierarchyDump {
+    nonisolated static let isRequested = UserDefaults.standard.bool(forKey: "dumpPanelHierarchy")
+
+    static func run() async {
+        try? await Task.sleep(for: .seconds(1))
+        guard let item = NSApp.windows.lazy
+            .filter({ $0.className == "NSStatusBarWindow" })
+            .compactMap({ $0.value(forKey: "statusItem") as? NSStatusItem })
+            .first(where: { $0.value(forKey: "expandedInterfaceDelegate") != nil })
+        else { fail(#line) }
+        item.perform(NSSelectorFromString("_requestExpandedInterfaceSession"))
+        var window: NSWindow?
+        for _ in 0..<80 {
+            window = window ?? NSApp.windows.first { $0.contentView?.className.contains("MenuBarExtra") == true }
+            window?.alphaValue = 0
+            try? await Task.sleep(for: .milliseconds(25))
+        }
+        guard let window else { fail(#line) }
+        print("window \(window.className) opaque=\(window.isOpaque) background=\(window.backgroundColor.debugDescription) shadow=\(window.hasShadow) visible=\(window.isVisible)")
+        if let frame = window.contentView?.superview { printViews(frame, depth: 0) }
+        for (layer, depth) in window.contentView?.layer.map({ glassLayers(in: $0, depth: 0) }) ?? [] {
+            let filter = layer.filters?.first as? NSObject
+            print("glass layer depth=\(depth) hidden=\(layer.isHidden) size=\(layer.bounds.size) blurRadius=\(filter?.value(forKey: "inputBlurRadius") ?? "?")")
+        }
+        exit(0)
+    }
+
+    private static func printViews(_ view: NSView, depth: Int) {
+        print(String(repeating: "  ", count: depth) + view.className)
+        view.subviews.forEach { printViews($0, depth: depth + 1) }
+    }
+}
+
 private enum Backdrop: CaseIterable, View {
     case gradient, terminal, document
 

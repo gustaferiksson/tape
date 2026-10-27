@@ -30,6 +30,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await PanelSnapshot.capture(to: output, recorder: recorder, updater: updater, recent: recent) }
             return
         }
+        if PanelHierarchyDump.isRequested {
+            Task { await PanelHierarchyDump.run() }
+            return
+        }
         #endif
         updater.isInstallBlocked = { [recorder] in recorder.isActive }
         updater.start()
