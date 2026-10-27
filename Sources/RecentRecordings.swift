@@ -33,7 +33,7 @@ final class RecentRecordings {
 
     func refresh() {
         #if DEBUG
-        if PanelSnapshot.output != nil { return }
+        if MenuSnapshot.output != nil { return }
         #endif
         scan?.cancel()
         let folder = settings.saveFolder, last = recorder.lastRecording, cache = durations
