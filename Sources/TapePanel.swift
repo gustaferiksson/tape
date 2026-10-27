@@ -150,7 +150,10 @@ private struct RecordButton: View {
             .keyboardShortcut(.defaultAction)
             .disabled(recorder.phase == .starting)
         } else {
-            Button { Task { await recorder.stop() } } label: {
+            Button {
+                guard recorder.elapsed > 0 else { return }
+                Task { await recorder.stop() }
+            } label: {
                 HStack {
                     Label(recorder.isRecording ? "Stop Recording" : "Saving…", systemImage: "stop.fill")
                     Spacer()
