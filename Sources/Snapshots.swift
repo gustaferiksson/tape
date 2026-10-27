@@ -94,19 +94,44 @@ enum PanelSnapshot {
             updater.simulateStaged(scenario.staged)
             recent.simulate(scenario.items)
             for (appearance, suffix) in [(NSAppearance.Name.aqua, "light"), (.darkAqua, "dark")] {
-                let panel = TapePanel(recorder: recorder, settings: .shared, updater: updater, recent: recent)
-                    .environment(\.controlActiveState, .key)
-                    .padding(24)
-                    .background(LinearGradient(colors: [.orange, .pink, .purple, .blue], startPoint: .topLeading, endPoint: .bottomTrailing))
-                let window = UnconstrainedWindow(contentRect: .zero, styleMask: [.borderless], backing: .buffered, defer: false)
-                window.contentView = NSHostingView(rootView: panel)
-                window.setContentSize(window.contentView?.fittingSize ?? .zero)
-                window.backgroundColor = .windowBackgroundColor
-                window.appearance = NSAppearance(named: appearance)
-                guard await SnapshotCapture.write(window, to: directory.appending(path: "panel-\(scenario.name)-\(suffix).png")) else { fail(#line) }
+                for backdrop in Backdrop.allCases {
+                    let panel = TapePanel(recorder: recorder, settings: .shared, updater: updater, recent: recent)
+                        .environment(\.controlActiveState, .key)
+                        .environment(\.appearsActive, true)
+                        .padding(24)
+                        .background { backdrop }
+                    let window = UnconstrainedWindow(contentRect: .zero, styleMask: [.borderless], backing: .buffered, defer: false)
+                    window.contentView = NSHostingView(rootView: panel)
+                    window.setContentSize(window.contentView?.fittingSize ?? .zero)
+                    window.backgroundColor = .windowBackgroundColor
+                    window.appearance = NSAppearance(named: appearance)
+                    guard await SnapshotCapture.write(window, to: directory.appending(path: "panel-\(scenario.name)-\(suffix)\(backdrop.suffix).png")) else { fail(#line) }
+                }
             }
         }
         exit(0)
+    }
+}
+
+private enum Backdrop: CaseIterable, View {
+    case gradient, terminal, document
+
+    var suffix: String {
+        if self == .gradient { return "" }
+        return "-\(self)"
+    }
+
+    var body: some View {
+        if self == .gradient {
+            LinearGradient(colors: [.orange, .pink, .purple, .blue], startPoint: .topLeading, endPoint: .bottomTrailing)
+        } else {
+            let isDark = self == .terminal
+            Text(String(repeating: "drwxr-xr-x  12 gustaf  staff  384 Oct 27 09:41 Sources  ~/Repos/Gustaf/tape (more-glass) $ swift test --package-path Packages/TapeCore ", count: 40))
+                .font(.system(size: 13, design: .monospaced))
+                .foregroundStyle(isDark ? Color.green.opacity(0.9) : Color.black.opacity(0.85))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .background(isDark ? Color(white: 0.08) : .white)
+        }
     }
 }
 

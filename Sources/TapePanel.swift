@@ -6,6 +6,7 @@ struct TapePanel: View {
     let settings: AppSettings
     let updater: AppUpdater
     let recent: RecentRecordings
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -21,7 +22,7 @@ struct TapePanel: View {
         .padding([.horizontal, .bottom], 16)
         .padding(.top, 8)
         .frame(width: 300)
-        .glassEffect(.regular, in: .rect(cornerRadius: 16))
+        .glassEffect(.clear.tint(colorScheme == .dark ? .black.opacity(0.35) : .white.opacity(0.2)), in: .rect(cornerRadius: 16))
         .toolbarVisibility(.hidden, for: .windowToolbar)
         .ignoresSafeArea(.container, edges: .top)
         .containerBackground(.clear, for: .window)
@@ -142,11 +143,13 @@ private struct RecordButton: View {
         if recorder.startedAt == nil {
             Button { Task { await recorder.start() } } label: {
                 Label(recorder.phase == .starting ? "Starting…" : "Record Audio", systemImage: "record.circle.fill")
-                    .frame(maxWidth: .infinity, minHeight: 24)
+                    .font(.title3)
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .contentShape(.capsule)
             }
-            .buttonStyle(.glassProminent)
-            .tint(.red)
-            .controlSize(.extraLarge)
+            .buttonStyle(.plain)
+            .glassEffect(.regular.tint(.red).interactive(), in: .capsule)
             .keyboardShortcut(.defaultAction)
             .disabled(recorder.phase == .starting)
         } else {
