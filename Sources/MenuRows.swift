@@ -8,7 +8,7 @@ struct RecordRow: View {
     var body: some View {
         MenuRow(isHighlighted: highlight.item == StatusMenu.recordItem) {
             HStack(spacing: 8) {
-                MenuBadge(symbol: recorder.startedAt == nil ? "circle.fill" : "stop.fill", tint: recorder.startedAt == nil ? nil : .red)
+                MenuBadge(symbol: recorder.startedAt == nil ? "circle.fill" : "stop.fill")
                 VStack(alignment: .leading, spacing: 0) {
                     HStack {
                         Text(title)
@@ -53,7 +53,6 @@ struct ReduceEchoRow: View {
             HStack {
                 VStack(alignment: .leading, spacing: 0) {
                     Text("Reduce Echo")
-                        .font(.headline)
                     if recorder.phase != .idle {
                         Text("Applies from the next recording.")
                             .font(.subheadline)
@@ -61,12 +60,8 @@ struct ReduceEchoRow: View {
                     }
                 }
                 Spacer(minLength: 8)
-                Toggle("Reduce Echo", isOn: Bindable(settings).reducesEcho)
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                    .labelsHidden()
+                MenuSwitch(title: "Reduce Echo", isOn: settings.reducesEcho, isHighlighted: highlight.item == StatusMenu.reduceEchoItem)
                     .disabled(recorder.phase != .idle)
-                    .allowsHitTesting(false)
             }
         }
     }
@@ -113,14 +108,42 @@ private struct MenuRow<Content: View>: View {
 
 private struct MenuBadge: View {
     let symbol: String
-    let tint: Color?
 
     var body: some View {
         Image(systemName: symbol)
             .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(tint == nil ? Color.primary : .white)
+            .foregroundStyle(.white)
             .frame(width: 28, height: 28)
-            .background(tint ?? Color.primary.opacity(0.1), in: .circle)
+            .background(.red, in: .circle)
             .accessibilityHidden(true)
+    }
+}
+
+// NSSwitch (behind SwiftUI's .switch style) draws its track grey whenever its window isn't key in the active app, which a status item's menu never is.
+private struct MenuSwitch: View {
+    let title: String
+    let isOn: Bool
+    let isHighlighted: Bool
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        Capsule()
+            .fill(track)
+            .frame(width: 28, height: 16)
+            .overlay(alignment: isOn ? .trailing : .leading) {
+                Circle()
+                    .fill(.white)
+                    .shadow(color: .black.opacity(0.25), radius: 1, y: 0.5)
+                    .padding(2)
+            }
+            .opacity(isEnabled ? 1 : 0.5)
+            .accessibilityRepresentation {
+                Toggle(title, isOn: .constant(isOn))
+            }
+    }
+
+    private var track: Color {
+        if isHighlighted { return .white.opacity(isOn ? 0.5 : 0.2) }
+        return isOn ? .accentColor : .primary.opacity(0.1)
     }
 }
