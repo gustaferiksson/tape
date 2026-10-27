@@ -80,9 +80,9 @@ Tape                          ⚙
   status line + action (optional)
 Reduce Echo              [  ◯]
 RECENT
-Today at 13:02         24:11  🔍
-Today at 09:30         41:52  🔍
-Yesterday at 16:45     12:03  🔍
+Today at 13:02         24:11  ⌕
+Today at 09:30         41:52  ⌕
+Yesterday at 16:45     12:03  ⌕
   update row (optional)
 ```
 
@@ -122,7 +122,7 @@ A full-width 44 pt (`.controlSize(.extraLarge)`) glass button, the only prominen
 
 ### Status line
 
-At most one, directly under the button, in the footnote style with a leading SF Symbol: `exclamationmark.triangle` for problems, `info.circle` for information. Secondary text on the glass, no coloured background or bar. Each persists until the next recording starts or its cause is fixed. None of them ever repeats as a prompt. Highest priority first:
+At most one, directly under the button, in callout size with a leading SF Symbol: `exclamationmark.triangle` for problems, `info.circle` for information. Secondary text on the glass, no coloured background or bar. Each persists until the next recording starts or its cause is fixed. None of them ever repeats as a prompt. Highest priority first:
 
 | Condition | Line | Action |
 |---|---|---|
@@ -143,7 +143,7 @@ A row: the label "Reduce Echo" and a small switch (HIG: a switch in a list-style
 
 ### Recent
 
-A "Recent" section header (footnote, secondary, small caps like a system list header), then the 3 newest recordings.
+A "Recent" section header (callout, semibold, secondary), then the 3 newest recordings.
 
 | Part | Behaviour |
 |---|---|

@@ -77,10 +77,12 @@ struct TapePanel: View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Reduce Echo")
+                    .accessibilityHidden(true)
                 if recorder.phase != .idle {
                     Text("Applies from the next recording.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
                 }
             }
             Spacer()
