@@ -3,6 +3,7 @@ import TapeCore
 
 struct RecordRow: View {
     let recorder: Recorder
+    let microphone: DefaultMicrophone
     let highlight: MenuHighlight
 
     var body: some View {
@@ -26,6 +27,10 @@ struct RecordRow: View {
                         }
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
+                    } else {
+                        Text(microphone.name ?? "No microphone")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }

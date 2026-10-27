@@ -495,7 +495,7 @@ final class CaptureSession: @unchecked Sendable {
         return Int(size) / MemoryLayout<AudioStreamID>.size
     }
 
-    private static func defaultDevice(_ selector: AudioObjectPropertySelector) -> AudioObjectID? {
+    static func defaultDevice(_ selector: AudioObjectPropertySelector) -> AudioObjectID? {
         var device = AudioObjectID(kAudioObjectUnknown)
         var size = UInt32(MemoryLayout<AudioObjectID>.size)
         var address = address(selector)
@@ -503,7 +503,7 @@ final class CaptureSession: @unchecked Sendable {
         return status == noErr && device != kAudioObjectUnknown ? device : nil
     }
 
-    private static func string(of object: AudioObjectID, _ selector: AudioObjectPropertySelector) -> String? {
+    static func string(of object: AudioObjectID, _ selector: AudioObjectPropertySelector) -> String? {
         var value: Unmanaged<CFString>?
         var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
         var address = address(selector)
@@ -511,7 +511,7 @@ final class CaptureSession: @unchecked Sendable {
         return value?.takeRetainedValue() as String?
     }
 
-    private static func address(_ selector: AudioObjectPropertySelector) -> AudioObjectPropertyAddress {
+    static func address(_ selector: AudioObjectPropertySelector) -> AudioObjectPropertyAddress {
         AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
     }
 }

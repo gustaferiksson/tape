@@ -34,6 +34,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     let menu = NSMenu()
     let highlight = MenuHighlight()
+    let microphone = DefaultMicrophone()
     private let recorder: Recorder
     private let settings: AppSettings
     private let updater: AppUpdater
@@ -70,7 +71,12 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         recorder.refreshPermissions()
         recent.refresh()
+        microphone.refresh()
         rebuild()
+    }
+
+    func menuWillOpen(_ menu: NSMenu) {
+        microphone.startListening()
     }
 
     func menu(_ menu: NSMenu, willHighlight item: NSMenuItem?) {
@@ -79,6 +85,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     func menuDidClose(_ menu: NSMenu) {
         highlight.item = nil
+        microphone.stopListening()
     }
 
     func rebuild() {
@@ -110,7 +117,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     }
 
     private func recordItem() -> NSMenuItem {
-        let item = viewItem(MenuRowHostingView(rootView: RecordRow(recorder: recorder, highlight: highlight)))
+        let item = viewItem(MenuRowHostingView(rootView: RecordRow(recorder: recorder, microphone: microphone, highlight: highlight)))
         item.identifier = Self.recordItem
         item.title = recorder.startedAt == nil ? "Record Audio" : "Stop Recording"
         item.target = self
