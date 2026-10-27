@@ -76,6 +76,7 @@ Clicking the label opens a native menu built the way macOS 26's own extras (Wi-F
 
 ```
 (●)  Record Audio                       custom row, red badge
+     MacBook Pro Microphone               detail line: default input
      ⚠ status line (optional)           custom row, not selectable
      Open Privacy Settings…             standard item (optional)
 Reduce Echo                       [◯]   custom row with a switch
@@ -96,7 +97,7 @@ Quit Tape                           ⌘Q
 
 Why a menu instead of the earlier panel: it's what a menu bar extra is (HIG: "display a menu, not a popover"), and it now behaves like the system's own: hover and arrow-key selection, type-select, ⌘, and ⌘Q, closing on click. What the panel added over the old plain menu (a live timer, the toggle, recent recordings with their durations) survives as custom rows and standard items with subtitles.
 
-Only the rows that can't be standard items are custom views: Record (badge, live elapsed time, two detail lines), Reduce Echo (inline switch) and the status line (wraps to a second line). Everything else is a standard `NSMenuItem`, so it gets the system highlight, keyboard and VoiceOver behaviour for free. macOS assigns its own symbols to Settings… and Quit (and macOS 27 shows only some of them), so the action items hide their images (`preferredImageVisibility = .hidden` on 27) and the menu has no symbols outside its badges, like Wi-Fi's. The Recent badges ask for `.visible`.
+Only the rows that can't be standard items are custom views: Record (badge, live elapsed time, detail lines), Reduce Echo (inline switch) and the status line (wraps to a second line). Everything else is a standard `NSMenuItem`, so it gets the system highlight, keyboard and VoiceOver behaviour for free. macOS assigns its own symbols to Settings… and Quit (and macOS 27 shows only some of them), so the action items hide their images (`preferredImageVisibility = .hidden` on 27) and the menu has no symbols outside its badges, like Wi-Fi's. The Recent badges ask for `.visible`.
 
 ### Custom rows
 
@@ -107,14 +108,14 @@ Only the rows that can't be standard items are custom views: Record (badge, live
 | Colour in the menu | The menu window is never key in an active app, so AppKit controls inside it draw inactive: an `NSSwitch` (SwiftUI's `.switch` toggle style) loses its accent tint, and neither `.tint`, `\.appearsActive` nor `\.controlActiveState` changes that. Plain SwiftUI fills keep their colour, so the switch is drawn as a small SwiftUI capsule in the accent colour (28×16 pt, white knob; on the selection highlight a translucent white track) |
 | Selection | Custom views don't highlight themselves. `menu(_:willHighlight:)` records the highlighted item in an `@Observable` `MenuHighlight`, so mouse hover and arrow keys both reach the SwiftUI row, which draws `selectedContentBackgroundColor` in a rounded rect (8 pt radius, inset 5 pt) with `selectedMenuItemTextColor` text, to match the standard items around it |
 | Click | Custom views get mouse events but no action. A small `NSHostingView` subclass sends its item's action on mouse up (if the item is enabled), the same action Return sends on a highlighted item. Record's action cancels tracking first, so the menu closes like after any item |
-| Live updates | The Record row observes `Recorder`, so the elapsed time ticks while the menu is open: the recorder's 1 s timer is in `.common` run-loop modes and the observation hops via the main queue, both of which run during menu tracking. Structure (which rows exist) is fixed per open |
+| Live updates | The Record row observes `Recorder`, so the elapsed time ticks while the menu is open: the recorder's 1 s timer is in `.common` run-loop modes and the observation hops via the main queue, both of which run during menu tracking. It also observes `DefaultMicrophone`, which reads the default input's name in `menuNeedsUpdate` and, from `menuWillOpen` to `menuDidClose`, listens for `kAudioHardwarePropertyDefaultInputDevice` on the main queue, so switching inputs while the menu is open updates the idle line. The listener exists only while the menu is open. Structure (which rows exist) is fixed per open |
 
 ### Record row
 
 | State | Row | Detail lines |
 |---|---|---|
-| Idle | Red badge with a white `circle.fill` dot, "Record Audio" | None |
-| Starting (prompts, writer setup) | Same, dimmed and disabled, "Starting…" | None |
+| Idle | Red badge with a white `circle.fill` dot, "Record Audio" | The default input's name ("MacBook Pro Microphone"), or "No microphone" when there's no input device |
+| Starting (prompts, writer setup) | Same, dimmed and disabled, "Starting…" | Same as idle |
 | Recording | Red badge with `stop.fill`, "Stop Recording", live elapsed time trailing in monospaced digits | "Recording audio · since 14:03" (`· saving to Movies › Tape` appended when it fell back, §9). "Microphone: AirPods Pro", the live default input, or "Microphone unavailable" |
 | Saving (finalising, usually under 1 s) | Dimmed and disabled, "Saving…", the time frozen | Same lines as recording |
 
@@ -122,6 +123,7 @@ Only the rows that can't be standard items are custom views: Record (badge, live
 - The red badge is Tape's record colour inside its own menu, next to the words Record and Stop. It doesn't imitate the system privacy indicators (§10), which live in the menu bar.
 - **Record and Stop close the menu**, like any menu item. The label is the confirmation: it gains the time when recording starts and drops it when it stops. Reopen the menu to see the mic line or the new file at the top of Recent.
 - The first Record shows the macOS microphone prompt (§5).
+- The idle line reads only Core Audio metadata (`kAudioHardwarePropertyDefaultInputDevice`, then the device's `kAudioObjectPropertyName`). It never opens the device or starts IO, so it needs no microphone permission and never prompts; nothing touches capture before Record. It's the system default input in both microphone paths, which is the device a recording uses, with or without Reduce Echo.
 
 ### Status line
 

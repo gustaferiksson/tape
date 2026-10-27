@@ -82,23 +82,25 @@ enum MenuSnapshot {
             RecentRecordings.Item(url: URL(filePath: "/c.m4a"), startedAt: today.addingTimeInterval(-7 * 3600), duration: 4983),
         ]
         let started = Date.now.addingTimeInterval(-1451)
-        let scenarios: [(name: String, since: Date?, notice: Notice?, staged: String?, items: [RecentRecordings.Item], highlighted: NSUserInterfaceItemIdentifier?, reducesEcho: Bool)] = [
-            ("idle", nil, nil, nil, recordings, nil, false),
-            ("idle-record-highlighted", nil, nil, nil, recordings, StatusMenu.recordItem, true),
-            ("idle-echo-highlighted", nil, nil, nil, recordings, StatusMenu.reduceEchoItem, true),
-            ("recording", started, nil, nil, recordings, nil, true),
-            ("recording-highlighted", started, nil, nil, recordings, StatusMenu.recordItem, true),
-            ("recording-notice", started, .reduceEchoUnavailable, "0.3.0", recordings, nil, true),
-            ("notice", nil, .microphoneDenied, nil, recordings, nil, true),
-            ("notice-info", nil, .fellBack(folder: "Call Recordings"), nil, recordings, nil, true),
-            ("update", nil, nil, "0.3.0", recordings, nil, true),
-            ("empty", nil, nil, nil, [], nil, false),
+        let scenarios: [(name: String, since: Date?, notice: Notice?, staged: String?, items: [RecentRecordings.Item], highlighted: NSUserInterfaceItemIdentifier?, reducesEcho: Bool, microphone: String?)] = [
+            ("idle", nil, nil, nil, recordings, nil, false, "MacBook Pro Microphone"),
+            ("idle-record-highlighted", nil, nil, nil, recordings, StatusMenu.recordItem, true, "MacBook Pro Microphone"),
+            ("idle-echo-highlighted", nil, nil, nil, recordings, StatusMenu.reduceEchoItem, true, "MacBook Pro Microphone"),
+            ("recording", started, nil, nil, recordings, nil, true, "MacBook Pro Microphone"),
+            ("recording-highlighted", started, nil, nil, recordings, StatusMenu.recordItem, true, "MacBook Pro Microphone"),
+            ("recording-notice", started, .reduceEchoUnavailable, "0.3.0", recordings, nil, true, "MacBook Pro Microphone"),
+            ("notice", nil, .microphoneDenied, nil, recordings, nil, true, "MacBook Pro Microphone"),
+            ("notice-info", nil, .fellBack(folder: "Call Recordings"), nil, recordings, nil, true, "MacBook Pro Microphone"),
+            ("update", nil, nil, "0.3.0", recordings, nil, true, "MacBook Pro Microphone"),
+            ("empty", nil, nil, nil, [], nil, false, "MacBook Pro Microphone"),
+            ("no-microphone", nil, nil, nil, recordings, nil, false, nil),
         ]
         for scenario in scenarios {
             recorder.simulate(since: scenario.since, microphone: scenario.since == nil ? nil : "AirPods Pro", notice: scenario.notice)
             updater.simulateStaged(scenario.staged)
             recent.simulate(scenario.items)
             AppSettings.shared.reducesEcho = scenario.reducesEcho
+            statusMenu.microphone.simulate(scenario.microphone)
             statusMenu.rebuild()
             statusMenu.highlight.item = scenario.highlighted
             print("menu-\(scenario.name):")
