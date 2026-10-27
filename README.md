@@ -18,14 +18,14 @@ Records system audio and your microphone into one file, on this Mac only.
 
 ## What it does
 
-Click the cassette in the menu bar, choose **Record Audio**, and Tape records everything your Mac plays plus your microphone into a single `.m4a` in `~/Movies/Tape`. Click **Stop Recording** and the file is ready to play, share or drop into a transcription tool.
+Click the waveform in the menu bar, choose **Record Audio**, and Tape records everything your Mac plays plus your microphone into a single `.m4a` in `~/Movies/Tape`. Click **Stop Recording** and the file is ready to play, share or drop into a transcription tool, right from the panel's Recent list.
 
 It works alongside Teams, Zoom, Meet or anything else that makes sound. Tape never changes your input or output device, so the call app doesn't notice it's there. There are no audio drivers or virtual devices to install: Tape uses a Core Audio process tap, which only needs macOS's **System Audio Recording Only** permission, not Screen Recording.
 
 | | |
 |---|---|
 | **One file** | System audio and microphone mixed into one mono AAC `.m4a` (about 30 MB per hour), named like a screenshot: `Tape 2026-10-26 at 14.03.05.m4a`. |
-| **Menu bar** | The label shows the elapsed time while recording, in plain monochrome so it never imitates the system's privacy indicators. Stop is always the first item. |
+| **Menu bar** | The label shows the elapsed time while recording, in plain monochrome so it never imitates the system's privacy indicators. Its panel has one Record/Stop button with a live timer, Reduce Echo, and your recent recordings (click to show in Finder, or drag into another app). |
 | **Crash safe** | The file is written in fragments, so a crash or power loss loses at most about 10 seconds, and Tape recovers the file on next launch. |
 | **Device changes** | Plug in headphones or switch microphones mid-call and Tape follows the system default input, keeping audio in sync. |
 | **Quiet** | No notifications, no windows unless you ask. Quitting or logging out mid-recording saves the file first. |
@@ -46,7 +46,7 @@ Recording a call without consent is illegal in many places, and rude everywhere 
 
 Tape records audio only.
 
-- **Echo reduction (experimental)**: on speakers, your microphone also hears the other side, so their voices appear twice with a slight delay. Turn on **Reduce Echo** in the menu or in Settings to run your microphone through macOS voice processing. It's off by default while it's being tested in real calls; headphones remain the cleanest option.
+- **Echo reduction (experimental)**: on speakers, your microphone also hears the other side, so their voices appear twice with a slight delay. Turn on **Reduce Echo** in the panel or in Settings to run your microphone through macOS voice processing. It's off by default while it's being tested in real calls; headphones remain the cleanest option.
 
 Planned next:
 
@@ -60,7 +60,7 @@ brew install --cask gustaferiksson/tap/tape
 
 Or download `Tape-<version>.zip` from the [latest release](https://github.com/gustaferiksson/tape/releases/latest) and move `Tape.app` to `/Applications`. Tape is signed and notarized, and updates itself.
 
-The first time you record, macOS asks for microphone access and then for system audio access. Both are needed: a call recording without the other side, or without you, is the wrong file. If you deny one, the menu shows a shortcut to the right pane in System Settings.
+The first time you record, macOS asks for microphone access and then for system audio access. Both are needed: a call recording without the other side, or without you, is the wrong file. If you deny one, the panel shows a shortcut to the right pane in System Settings.
 
 ## Privacy
 

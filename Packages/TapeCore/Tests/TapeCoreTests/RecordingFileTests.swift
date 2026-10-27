@@ -24,4 +24,20 @@ struct RecordingFileTests {
         let url = RecordingFile.url(in: folder, startedAt: evening, fileExtension: "m4a", timeZone: utc) { _ in false }
         #expect(url.lastPathComponent == "Tape 2026-10-26 at 22.03.05.m4a")
     }
+
+    @Test func readsStartTimeBackFromName() {
+        let url = RecordingFile.url(in: folder, startedAt: start, fileExtension: "m4a", timeZone: utc) { _ in false }
+        #expect(RecordingFile.startDate(of: url, timeZone: utc) == start)
+    }
+
+    @Test func readsStartTimeOfNumberedAndScreenFiles() {
+        #expect(RecordingFile.startDate(of: folder.appending(path: "Tape 2026-10-26 at 14.03.05 2.m4a"), timeZone: utc) == start)
+        #expect(RecordingFile.startDate(of: folder.appending(path: "Tape 2026-10-26 at 14.03.05.mov"), timeZone: utc) == start)
+    }
+
+    @Test func ignoresFilesTapeDidNotName() {
+        for name in ["Notes.m4a", "Tape 2026-10-26 at 14.03.05.mp3", "Tape 2026-10-26 at 14.03.05 copy.m4a", "Tape 2026-10-26 at 14.03.05 .m4a", "Tape 2026-10-26.m4a", "My Tape 2026-10-26 at 14.03.05.m4a"] {
+            #expect(RecordingFile.startDate(of: folder.appending(path: name), timeZone: utc) == nil, "\(name)")
+        }
+    }
 }

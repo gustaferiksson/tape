@@ -119,6 +119,12 @@ final class AppUpdater {
         installAndRelaunch()
     }
 
+    #if DEBUG
+    func simulateStaged(_ version: String?) {
+        staged = version.map { ($0, URL(filePath: "/nonexistent")) }
+    }
+    #endif
+
     func installAndRelaunch() {
         guard !isInstallBlocked() else { return }
         if let reason = spawnSwap(then: .open) {

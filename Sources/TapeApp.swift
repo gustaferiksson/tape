@@ -7,11 +7,11 @@ struct TapeApp: App {
 
     var body: some Scene {
         MenuBarExtra(isInserted: menuBarInserted) {
-            TapeMenu(recorder: appDelegate.recorder, settings: .shared, updater: appDelegate.updater)
+            TapePanel(recorder: appDelegate.recorder, settings: .shared, updater: appDelegate.updater, recent: appDelegate.recent)
         } label: {
             Image(nsImage: menuBarImage(phase: appDelegate.recorder.phase, elapsed: appDelegate.recorder.elapsed))
         }
-        .menuBarExtraStyle(.menu)
+        .menuBarExtraStyle(.window)
 
         Settings {
             SettingsView(settings: .shared)
@@ -21,95 +21,9 @@ struct TapeApp: App {
 
     private var menuBarInserted: Binding<Bool> {
         #if DEBUG
-        if SettingsSnapshot.output != nil || LabelSnapshot.output != nil { return .constant(false) }
+        if SettingsSnapshot.output != nil || LabelSnapshot.output != nil || PanelSnapshot.output != nil { return .constant(false) }
         #endif
         return .constant(true)
-    }
-}
-
-private struct TapeMenu: View {
-    let recorder: Recorder
-    let settings: AppSettings
-    let updater: AppUpdater
-
-    var body: some View {
-        if let since = recorder.startedAt {
-            Button("Stop Recording") { Task { await recorder.stop() } }
-                .disabled(!recorder.isRecording)
-            Text("Recording audio · since \(since.formatted(date: .omitted, time: .shortened))\(recorder.isSavingToFallback ? " · saving to Movies › Tape" : "")")
-            Text(recorder.microphoneName.map { "Microphone: \($0)" } ?? "Microphone unavailable")
-            if let notice = recorder.notice { Text(notice.text) }
-            Toggle("Reduce Echo", isOn: Bindable(settings).reducesEcho)
-                .disabled(true)
-            Divider()
-            Button("Open Recordings Folder", action: openFolder)
-            Divider()
-            UpdateMenuItems(updater: updater, isRecording: true)
-            SettingsLink { Text("Settings…") }
-                .keyboardShortcut(",")
-            Button("Stop and Quit Tape") { NSApp.terminate(nil) }
-                .keyboardShortcut("q")
-        } else {
-            Button("Record Audio") { Task { await recorder.start() } }
-                .disabled(recorder.phase == .starting)
-            if let notice = recorder.notice {
-                Text(notice.text)
-                if let pane = notice.privacyPane {
-                    Button("Open Privacy Settings…") { NSWorkspace.shared.open(pane.url) }
-                }
-            }
-            Divider()
-            Toggle("Reduce Echo", isOn: Bindable(settings).reducesEcho)
-            Divider()
-            Button("Show Last Recording in Finder") {
-                if let url = recorder.lastRecording { NSWorkspace.shared.activateFileViewerSelecting([url]) }
-            }
-            .disabled(recorder.lastRecording.map { !FileManager.default.fileExists(atPath: $0.path) } ?? true)
-            Button("Open Recordings Folder", action: openFolder)
-            Divider()
-            UpdateMenuItems(updater: updater, isRecording: false)
-            SettingsLink { Text("Settings…") }
-                .keyboardShortcut(",")
-            Button("Quit Tape") { NSApp.terminate(nil) }
-                .keyboardShortcut("q")
-        }
-    }
-
-    private func openFolder() {
-        let folder = FileManager.default.fileExists(atPath: settings.saveFolder.path) ? settings.saveFolder : AppSettings.defaultFolder
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        NSWorkspace.shared.open(folder)
-    }
-}
-
-private struct UpdateMenuItems: View {
-    let updater: AppUpdater
-    let isRecording: Bool
-
-    var body: some View {
-        if let staged = updater.staged {
-            Button(isRecording ? "Tape \(staged.version) installs after recording" : "Install Tape \(staged.version) and Relaunch", action: updater.installAndRelaunch)
-                .disabled(isRecording)
-        } else {
-            Button(checkTitle) { updater.check(.manual) }
-                .disabled(updater.isBusy)
-        }
-        if let note {
-            Text(note)
-        }
-    }
-
-    private var checkTitle: String {
-        if updater.status == .checking { return "Checking for Updates…" }
-        if updater.status == .downloading { return "Downloading Update…" }
-        return "Check for Updates…"
-    }
-
-    private var note: String? {
-        if case .upToDate(let version) = updater.status { return "Tape \(version) is the latest version." }
-        if case .blocked(let message) = updater.status { return message }
-        if case .failed(let message) = updater.status { return message }
-        return nil
     }
 }
 
@@ -118,7 +32,7 @@ private struct UpdateMenuItems: View {
 func menuBarImage(phase: Recorder.Phase, elapsed: Int) -> NSImage {
     let font = NSFont.menuBarFont(ofSize: 0)
     let isIdle = phase == .idle || phase == .starting
-    let symbol = NSImage(systemSymbolName: isIdle ? "record.circle" : "record.circle.fill", accessibilityDescription: nil)?
+    let symbol = NSImage(systemSymbolName: "waveform", variableValue: isIdle ? 0 : 1, accessibilityDescription: nil)?
         .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: font.pointSize, weight: .medium))
     let title = NSAttributedString(
         string: isIdle ? "" : ElapsedTime.clock(elapsed),
