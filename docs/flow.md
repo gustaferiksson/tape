@@ -3,7 +3,7 @@
 Tape is a local-only menu bar recorder for calls. It records system audio and your microphone into a single track, and optionally the screen. Its guiding rule: **non-intrusive and easy**. It shows no window unless asked, sends no notifications, and adds no prompts beyond the ones macOS requires.
 
 - macOS 26.0 deployment target, matching rinse and tidy. Nothing used here needs 27: process taps date from 14.2, `SCContentSharingPicker` from 14, and voice-processing ducking control from 14.
-- Pure SwiftUI, no Dock icon (`LSUIElement`), no third-party packages. Liquid Glass through system components, plus the panel's own `glassEffect` surface (§4).
+- Pure SwiftUI, no Dock icon (`LSUIElement`), no third-party packages. Liquid Glass through system components only (§4).
 - Not sandboxed, like rinse. Hardened runtime with `com.apple.security.device.audio-input`.
 - The only network access is the existing GitHub releases `AppUpdater`.
 - Sizes, padding and radii are multiples of 4 pt.
@@ -72,11 +72,11 @@ Why a separate window rather than a Stop row in Settings: Settings holds rarely 
 
 ## 4. Panel
 
-Clicking the label opens a Liquid Glass panel, tidy's pattern: `.menuBarExtraStyle(.window)`, the content on `.glassEffect(.regular, in: .rect(cornerRadius: 16))`, `.containerBackground(.clear, for: .window)` and the window toolbar hidden. 300 pt wide, its height follows the content. One layout with four states (idle, starting, recording, saving), so nothing jumps around when a recording starts or stops.
+Clicking the label opens a Liquid Glass panel: `.menuBarExtraStyle(.window)`, whose own system `.regular` glass is the panel's only glass layer, with `.containerBackground(.clear, for: .window)` and the window toolbar hidden. Nothing inside the panel draws glass of its own: never glass inside glass. Controls in it are plain, borderless, bordered or link styles, and the one exception is the record button's tinted `.glassProminent`, Apple's style for a primary action inside glass. `-panelSnapshot` wraps the panel in `.glassEffect(.regular, in: .rect(cornerRadius: 16))` to stand in for the system glass, which an off-screen window doesn't get. 300 pt wide, its height follows the content. One layout with four states (idle, starting, recording, saving), so nothing jumps around when a recording starts or stops.
 
 ```
 Tape                          ⚙
-[ ◉  Record Audio            ]     one prominent glass button
+[ ◉  Record Audio            ]     one tinted prominent button
   status line + action (optional)
 Reduce Echo              [  ◯]
 RECENT
@@ -106,16 +106,16 @@ Why a panel instead of a menu: a menu is a snapshot, so the elapsed time lived o
 
 ### Record button
 
-A full-width 44 pt (`.controlSize(.extraLarge)`) glass button, the only prominent control in the panel (HIG: one prominent button per view).
+A full-width `.glassProminent` button at `.controlSize(.extraLarge)` (about 36 pt) with a white label, the only prominent control in the panel (HIG: one prominent button per view).
 
 | State | Button | Under it |
 |---|---|---|
-| Idle | `.glassProminent`, red tint: `record.circle.fill` + "Record Audio". Return activates it | Status line, if any |
+| Idle | Tinted a calmer red (system red mixed 20% toward black): `record.circle.fill` + "Record Audio". Return activates it | Status line, if any |
 | Starting (prompts, writer setup) | Same, disabled, title "Starting…" | Nothing |
-| Recording | `.glass` (not prominent, not red): `stop.fill` + "Stop Recording", and the live elapsed time trailing in monospaced digits. Return activates it | "Recording audio · since 14:03" (`· saving to Movies › Tape` appended when it fell back, §9). "Microphone: AirPods Pro", the live default input, or "Microphone unavailable". The "Reduce Echo couldn't start…" status line if it applies |
+| Recording | Same style tinted neutral gray (not red): `stop.fill` + "Stop Recording", and the live elapsed time trailing in monospaced digits. Return activates it | "Recording audio · since 14:03" (`· saving to Movies › Tape` appended when it fell back, §9). "Microphone: AirPods Pro", the live default input, or "Microphone unavailable". The "Reduce Echo couldn't start…" status line if it applies |
 | Saving (finalising, usually under 1 s) | Disabled, "Saving…", the time frozen | Same lines as recording |
 
-- Record and Stop are the same button, so it never moves: the QuickTime pattern, and there's only ever one recording. Record Screen… (§6, not built yet) will be a second, regular glass button beside it, not a second prominent one.
+- Record and Stop are the same button, so it never moves: the QuickTime pattern, and there's only ever one recording. Record Screen… (§6, not built yet) will be a second, bordered button beside it, not a second prominent one and not glass.
 - The red tint is inside Tape's own panel, next to the word Record. It doesn't imitate the system privacy indicators (§10), which live in the menu bar.
 - **The panel stays open after Record.** The timer starting is the confirmation, and you can see the mic line is right. Clicking outside, Esc, or clicking the label closes it, as any panel. After Stop it also stays open and the new file appears at the top of Recent.
 - The first Record shows the macOS microphone prompt (§5), which takes focus, so the panel closes. That's the system's standard behaviour, and the label shows the recording once it starts.
@@ -161,7 +161,7 @@ A "Recent" section header (callout, semibold, secondary), then the 3 newest reco
 
 ### Update row
 
-Only while an update is staged (`AppUpdater.staged`), at the bottom under a divider: "Tape *x* is ready." and an "Install and Relaunch" button (regular glass, small; never prominent, Record owns that). While recording the text reads "Tape *x* installs after recording." and the button is disabled. Other updater states stay in the ⚙ menu (above), so a routine "up to date" never takes space in the panel.
+Only while an update is staged (`AppUpdater.staged`), at the bottom under a divider: "Tape *x* is ready." and an "Install and Relaunch" button (bordered, small; never prominent or glass, Record owns that). While recording the text reads "Tape *x* installs after recording." and the button is disabled. Other updater states stay in the ⚙ menu (above), so a routine "up to date" never takes space in the panel.
 
 ### Keyboard
 

@@ -6,7 +6,6 @@ struct TapePanel: View {
     let settings: AppSettings
     let updater: AppUpdater
     let recent: RecentRecordings
-    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -22,7 +21,6 @@ struct TapePanel: View {
         .padding([.horizontal, .bottom], 16)
         .padding(.top, 8)
         .frame(width: 300)
-        .glassEffect(.clear.tint(colorScheme == .dark ? .black.opacity(0.35) : .white.opacity(0.2)), in: .rect(cornerRadius: 16))
         .toolbarVisibility(.hidden, for: .windowToolbar)
         .ignoresSafeArea(.container, edges: .top)
         .containerBackground(.clear, for: .window)
@@ -106,7 +104,7 @@ struct TapePanel: View {
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
                 Button("Install and Relaunch", action: updater.installAndRelaunch)
-                    .buttonStyle(.glass)
+                    .buttonStyle(.bordered)
                     .controlSize(.small)
                     .disabled(recorder.isActive)
             }
@@ -142,26 +140,19 @@ private struct RecordButton: View {
     var body: some View {
         Button(action: toggle) {
             HStack {
-                Label {
-                    Text(title)
-                } icon: {
-                    Image(systemName: recorder.startedAt == nil ? "record.circle.fill" : "stop.fill")
-                        .foregroundStyle(.red)
-                }
+                Label(title, systemImage: recorder.startedAt == nil ? "record.circle.fill" : "stop.fill")
                 if recorder.startedAt != nil {
                     Spacer()
                     Text(ElapsedTime.clock(recorder.elapsed))
                         .monospacedDigit()
-                        .foregroundStyle(.secondary)
                 }
             }
-            .font(.title3)
-            .padding(.horizontal, 16)
-            .frame(maxWidth: .infinity, minHeight: 44)
-            .contentShape(.capsule)
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity)
         }
-        .buttonStyle(.plain)
-        .glassEffect(.regular.interactive(), in: .capsule)
+        .buttonStyle(.glassProminent)
+        .controlSize(.extraLarge)
+        .tint(recorder.startedAt == nil ? Color.red.mix(with: .black, by: 0.2) : .gray)
         .keyboardShortcut(.defaultAction)
         .disabled(recorder.startedAt == nil ? recorder.phase == .starting : !recorder.isRecording)
         .accessibilityLabel(title)
