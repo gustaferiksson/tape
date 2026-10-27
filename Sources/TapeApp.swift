@@ -8,7 +8,6 @@ struct TapeApp: App {
     var body: some Scene {
         MenuBarExtra(isInserted: menuBarInserted) {
             TapePanel(recorder: appDelegate.recorder, settings: .shared, updater: appDelegate.updater, recent: appDelegate.recent)
-                .background(SystemGlassHider())
         } label: {
             Image(nsImage: menuBarImage(phase: appDelegate.recorder.phase, elapsed: appDelegate.recorder.elapsed))
         }
