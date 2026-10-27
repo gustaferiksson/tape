@@ -21,6 +21,17 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         return formatter
     }()
 
+    // Drawn per appearance, like the SwiftUI MenuBadge on the Record row.
+    private static let recentBadge = NSImage(size: NSSize(width: 28, height: 28), flipped: false) { @Sendable rect in
+        NSColor.labelColor.withAlphaComponent(0.1).setFill()
+        NSBezierPath(ovalIn: rect).fill()
+        guard let glyph = NSImage(systemSymbolName: "waveform", accessibilityDescription: nil)?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 12, weight: .semibold).applying(.init(paletteColors: [.labelColor])))
+        else { return true }
+        glyph.draw(in: NSRect(x: rect.midX - glyph.size.width / 2, y: rect.midY - glyph.size.height / 2, width: glyph.size.width, height: glyph.size.height))
+        return true
+    }
+
     let menu = NSMenu()
     let highlight = MenuHighlight()
     private let recorder: Recorder
@@ -119,8 +130,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private func recentItem(_ recording: RecentRecordings.Item) -> NSMenuItem {
         let item = actionItem(Self.dateFormatter.string(from: recording.startedAt), #selector(revealRecording), value: recording.url)
         item.subtitle = recording.duration.map(ElapsedTime.clock)
-        item.image = NSImage(systemSymbolName: "waveform.circle.fill", accessibilityDescription: nil)?
-            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 22, weight: .regular).applying(.init(paletteColors: [.labelColor, .quaternaryLabelColor])))
+        item.image = Self.recentBadge
         item.toolTip = "Show in Finder"
         return item
     }

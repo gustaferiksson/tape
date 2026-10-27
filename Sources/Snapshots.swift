@@ -70,7 +70,7 @@ enum LabelSnapshot {
 enum MenuSnapshot {
     nonisolated static let output = UserDefaults.standard.string(forKey: "menuSnapshot").map { URL(filePath: $0, directoryHint: .isDirectory) }
 
-    // Off screen only the custom-view rows can be drawn; standard items are printed as an outline.
+    // Off screen only the custom-view rows and item images can be drawn; standard items are printed as an outline.
     static func capture(to directory: URL, recorder: Recorder, updater: AppUpdater, recent: RecentRecordings) async {
         SnapshotCapture.prepare()
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -105,7 +105,7 @@ enum MenuSnapshot {
                 print("  \(outline(of: item))")
             }
             for (appearance, suffix) in [(NSAppearance.Name.aqua, "light"), (.darkAqua, "dark")] {
-                let background = menuBackground(rows: statusMenu.menu.items.compactMap(\.view))
+                let background = menuBackground(rows: statusMenu.menu.items.compactMap { $0.view ?? $0.image.map(imageView) })
                 let window = UnconstrainedWindow(contentRect: background.frame, styleMask: [.borderless], backing: .buffered, defer: false)
                 window.contentView = background
                 window.appearance = NSAppearance(named: appearance)
@@ -125,6 +125,12 @@ enum MenuSnapshot {
             item.image == nil ? nil : "image",
         ].compactMap { $0 }
         return "[\(kind)] \(item.title)\(details.isEmpty ? "" : " (\(details.joined(separator: ", ")))")"
+    }
+
+    private static func imageView(_ image: NSImage) -> NSView {
+        let view = NSImageView(frame: NSRect(origin: .zero, size: image.size))
+        view.image = image
+        return view
     }
 
     private static func menuBackground(rows: [NSView]) -> NSView {

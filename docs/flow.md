@@ -142,7 +142,7 @@ At most one, directly under the Record row: a custom row (it wraps, which a stan
 
 ### Reduce Echo
 
-A custom row laid out like Wi-Fi's header: "Reduce Echo" in bold on the left, a small switch on the right. The same setting as in Settings (§12). Clicking anywhere on the row, or Return when it's highlighted, flips the switch and keeps the menu open (the switch itself ignores hits so a click never flips it twice).
+A custom row laid out like Wi-Fi's header: "Reduce Echo" in bold on the left, a small switch on the right. The same setting as in Settings (§12). Clicking anywhere on the row flips the switch and keeps the menu open, as Wi-Fi's switch does (the switch itself ignores hits so a click never flips it twice). Return on the highlighted row flips it and closes the menu, like any item.
 
 - While recording or saving the item is disabled, the switch dims, and the row adds "Applies from the next recording." under the label, so it's clear why it's locked and that it still shows the setting.
 
@@ -180,7 +180,7 @@ Standard menu keyboard handling, nothing custom:
 | Key | Action |
 |---|---|
 | ↓ / ↑ | Moves the selection, custom rows included (the status line is skipped). Record is first |
-| Return | Activates the selected item: Record or Stop, flip Reduce Echo, reveal a recording |
+| Return | Activates the selected item and closes the menu: Record or Stop, flip Reduce Echo, reveal a recording |
 | ⌘, | Settings |
 | ⌘Q | Quit Tape, or Stop and Quit while recording |
 | Esc | Closes the menu |
