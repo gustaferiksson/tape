@@ -47,12 +47,13 @@ There is no onboarding window, no notification, and no post-recording window. Re
 
 | State | Label | Accessibility description |
 |---|---|---|
-| Idle | `record.circle` | "Tape" |
-| Starting (prompts or writer setup in progress) | `record.circle`, unchanged | "Tape, starting" |
-| Recording | `record.circle.fill` + `12:34` | "Tape, recording, 12 minutes" |
-| Stopping (finalising, usually under 1 s) | `record.circle.fill` + frozen time | "Tape, saving" |
+| Idle | `waveform` at variable value 0 (every bar dimmed) | "Tape" |
+| Starting (prompts or writer setup in progress) | The same, unchanged | "Tape, starting" |
+| Recording | `waveform` at variable value 1 (every bar full) + `12:34` | "Tape, recording, 12 minutes" |
+| Stopping (finalising, usually under 1 s) | `waveform` at 1 + frozen time | "Tape, saving" |
 
 - Symbols use `.medium` weight to match the optical weight of the system extras (Wi-Fi, battery).
+- One glyph for both states, told apart by SF Symbols variable value (`NSImage(systemSymbolName:variableValue:accessibilityDescription:)`), like Wi-Fi's signal bars: dimmed bars at rest, full bars while recording, plus the time. `waveform` supports variable value; the dimmed bars are partial alpha, which a template image keeps, so they read as a lighter grey on both light and dark menu bars.
 - The recording label is drawn into a template `NSImage` (symbol, 4 pt gap, time), as tidy and spaces do. It's monochrome like every extra: no red dot, so it never imitates the system's privacy indicators (§10).
 - Time format: `m:ss` under an hour, `h:mm:ss` after. Monospaced digits so the item doesn't jitter. The image redraws once a second.
 - The accessibility description updates once a minute, not every second, so VoiceOver isn't flooded.

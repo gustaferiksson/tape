@@ -32,7 +32,7 @@ struct TapeApp: App {
 func menuBarImage(phase: Recorder.Phase, elapsed: Int) -> NSImage {
     let font = NSFont.menuBarFont(ofSize: 0)
     let isIdle = phase == .idle || phase == .starting
-    let symbol = NSImage(systemSymbolName: isIdle ? "record.circle" : "record.circle.fill", accessibilityDescription: nil)?
+    let symbol = NSImage(systemSymbolName: "waveform", variableValue: isIdle ? 0 : 1, accessibilityDescription: nil)?
         .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: font.pointSize, weight: .medium))
     let title = NSAttributedString(
         string: isIdle ? "" : ElapsedTime.clock(elapsed),

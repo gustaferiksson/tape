@@ -32,17 +32,37 @@ enum LabelSnapshot {
         ]
         for (name, phase, elapsed) in labels {
             let image = menuBarImage(phase: phase, elapsed: elapsed)
-            let scaled = NSImage(size: NSSize(width: image.size.width * 4, height: image.size.height * 4), flipped: false) { rect in
-                image.draw(in: rect)
-                return true
+            for (bar, glyph, suffix) in [(NSColor(white: 0.93, alpha: 1), NSColor.black, "light"), (NSColor(white: 0.12, alpha: 1), .white, "dark")] {
+                for scale in [1, 2] {
+                    guard let png = menuBar(image, bar: bar, glyph: glyph, scale: CGFloat(scale)) else { fail(#line) }
+                    try? png.write(to: directory.appending(path: "label-\(name)-\(suffix)@\(scale)x.png"))
+                }
             }
-            guard let tiff = scaled.tiffRepresentation, let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) else { fail(#line) }
-            try? png.write(to: directory.appending(path: "label-\(name).png"))
             print("label-\(name): \(image.size.width)x\(image.size.height) pt, \(image.accessibilityDescription ?? "")")
         }
         recorder.simulate(since: .now.addingTimeInterval(-754), microphone: "MacBook Pro Microphone", notice: nil)
         guard await SnapshotCapture.write(RecordingView(recorder: recorder), title: "Tape", to: directory.appending(path: "recording-window.png")) else { fail(#line) }
         exit(0)
+    }
+
+    // Fills the template the way the menu bar does (.sourceAtop keeps its alpha), on a 24 pt bar.
+    private static func menuBar(_ template: NSImage, bar: NSColor, glyph: NSColor, scale: CGFloat) -> Data? {
+        let size = NSSize(width: template.size.width + 16, height: 24)
+        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width * scale), pixelsHigh: Int(size.height * scale), bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { return nil }
+        rep.size = size
+        let filled = NSImage(size: template.size, flipped: false) { rect in
+            template.draw(in: rect)
+            glyph.setFill()
+            rect.fill(using: .sourceAtop)
+            return true
+        }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        bar.setFill()
+        NSRect(origin: .zero, size: size).fill()
+        filled.draw(at: NSPoint(x: 8, y: ((size.height - template.size.height) / 2).rounded()), from: .zero, operation: .sourceOver, fraction: 1)
+        NSGraphicsContext.restoreGraphicsState()
+        return rep.representation(using: .png, properties: [:])
     }
 }
 
