@@ -5,6 +5,7 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let updater = AppUpdater()
     let recorder = Recorder(settings: .shared)
+    private(set) lazy var recent = RecentRecordings(settings: .shared, recorder: recorder)
     private var observers: [NSObjectProtocol] = []
     private lazy var recordingWindow: NSWindow = {
         let window = NSWindow(contentViewController: NSHostingController(rootView: RecordingView(recorder: recorder)))
@@ -25,6 +26,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await LabelSnapshot.capture(to: output, recorder: recorder) }
             return
         }
+        if let output = PanelSnapshot.output {
+            Task { await PanelSnapshot.capture(to: output, recorder: recorder, updater: updater, recent: recent) }
+            return
+        }
         #endif
         updater.isInstallBlocked = { [recorder] in recorder.isActive }
         updater.start()
@@ -37,7 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [recorder] _ in
                 MainActor.assumeIsolated { recorder.refreshPermissions() }
             },
-            NotificationCenter.default.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: .main) { [recorder] _ in
+            NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main) { [recorder] _ in
                 MainActor.assumeIsolated { recorder.refreshPermissions() }
             },
         ]
@@ -71,12 +76,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             recordingWindow.makeKeyAndOrderFront(nil)
             return true
         }
-        // SwiftUI rejects showSettingsWindow: sent from code ("use SettingsLink") but honours its own app-menu item.
-        guard let menu = NSApp.mainMenu?.items.first?.submenu,
-              let index = menu.items.firstIndex(where: { $0.keyEquivalent == "," })
-        else { return true }
-        NSApp.activate()
-        menu.performActionForItem(at: index)
+        showSettingsWindow()
         return true
     }
+}
+
+// SwiftUI rejects showSettingsWindow: sent from code ("use SettingsLink") but honours its own app-menu item.
+@MainActor
+func showSettingsWindow() {
+    guard let menu = NSApp.mainMenu?.items.first?.submenu,
+          let index = menu.items.firstIndex(where: { $0.keyEquivalent == "," })
+    else { return }
+    NSApp.activate()
+    menu.performActionForItem(at: index)
 }

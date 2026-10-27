@@ -28,7 +28,7 @@ final class Recorder {
     @ObservationIgnored private var session: CaptureSession?
     @ObservationIgnored private var sessionID: UUID?
     @ObservationIgnored private var lastDiskCheck = Date.distantPast
-    @ObservationIgnored private var recordingURL: URL?
+    @ObservationIgnored private(set) var recordingURL: URL?
     @ObservationIgnored private var recordingVolume = ""
     @ObservationIgnored private var fallbackFrom: String?
     @ObservationIgnored private var timer: Timer?
@@ -155,10 +155,11 @@ final class Recorder {
     }
 
     #if DEBUG
-    func simulateRecording(since: Date, microphone: String) {
-        phase = .recording(since: since)
-        elapsed = Int(Date.now.timeIntervalSince(since))
+    func simulate(since: Date?, microphone: String?, notice: Notice?) {
+        phase = since.map { .recording(since: $0) } ?? .idle
+        elapsed = since.map { Int(Date.now.timeIntervalSince($0)) } ?? 0
         microphoneName = microphone
+        self.notice = notice
     }
     #endif
 
