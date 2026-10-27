@@ -6,28 +6,13 @@ struct TapeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        MenuBarExtra(isInserted: menuBarInserted) {
-            TapePanel(recorder: appDelegate.recorder, settings: .shared, updater: appDelegate.updater, recent: appDelegate.recent)
-        } label: {
-            Image(nsImage: menuBarImage(phase: appDelegate.recorder.phase, elapsed: appDelegate.recorder.elapsed))
-        }
-        .menuBarExtraStyle(.window)
-
         Settings {
             SettingsView(settings: .shared)
                 .environment(appDelegate.updater)
         }
     }
-
-    private var menuBarInserted: Binding<Bool> {
-        #if DEBUG
-        if SettingsSnapshot.output != nil || LabelSnapshot.output != nil || PanelSnapshot.output != nil { return .constant(false) }
-        #endif
-        return .constant(true)
-    }
 }
 
-// MenuBarExtra flattens its label to plain title text, so the glyph and time are drawn into one template image.
 @MainActor
 func menuBarImage(phase: Recorder.Phase, elapsed: Int) -> NSImage {
     let font = NSFont.menuBarFont(ofSize: 0)

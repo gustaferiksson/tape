@@ -5,7 +5,7 @@ import Observation
 final class AppSettings {
     static let shared: AppSettings = {
         #if DEBUG
-        if SettingsSnapshot.output != nil || LabelSnapshot.output != nil || PanelSnapshot.output != nil {
+        if SettingsSnapshot.output != nil || LabelSnapshot.output != nil || MenuSnapshot.output != nil {
             let suite = "dev.gustaf.tape.snapshot"
             UserDefaults.standard.removePersistentDomain(forName: suite)
             return AppSettings(store: UserDefaults(suiteName: suite) ?? .standard)

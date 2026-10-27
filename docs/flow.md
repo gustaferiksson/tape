@@ -3,7 +3,7 @@
 Tape is a local-only menu bar recorder for calls. It records system audio and your microphone into a single track, and optionally the screen. Its guiding rule: **non-intrusive and easy**. It shows no window unless asked, sends no notifications, and adds no prompts beyond the ones macOS requires.
 
 - macOS 26.0 deployment target, matching rinse and tidy. Nothing used here needs 27: process taps date from 14.2, `SCContentSharingPicker` from 14, and voice-processing ducking control from 14.
-- Pure SwiftUI, no Dock icon (`LSUIElement`), no third-party packages. Liquid Glass through system components only (§4).
+- SwiftUI views, no Dock icon (`LSUIElement`), no third-party packages. AppKit only where SwiftUI has no equivalent: the status item and its menu (§4). Liquid Glass through system components only.
 - Not sandboxed, like rinse. Hardened runtime with `com.apple.security.device.audio-input`.
 - The only network access is the existing GitHub releases `AppUpdater`.
 - Sizes, padding and radii are multiples of 4 pt.
@@ -13,7 +13,7 @@ Tape is a local-only menu bar recorder for calls. It records system audio and yo
 | Surface | What it is |
 |---|---|
 | Menu bar label | Idle: a glyph. Recording: a glyph plus the elapsed time |
-| Panel | `MenuBarExtra` with `.menuBarExtraStyle(.window)`: a Liquid Glass panel, as in tidy (§4). Idle, starting, recording and saving states of one layout |
+| Menu | `NSStatusItem` + `NSMenu` with SwiftUI custom-view rows, built like the system's Wi-Fi and Sound menus (§4). Idle, starting, recording and saving states of one layout |
 | System content picker | `SCContentSharingPicker`, opened by Record Screen…. Tape has no picker UI of its own |
 | Settings scene | `Settings` with a `TabView` of grouped `Form`s: General, About |
 | Recording window | A small window, shown only when Tape is reopened during a recording (§3) |
@@ -57,9 +57,9 @@ There is no onboarding window, no notification, and no post-recording window. Re
 - The recording label is drawn into a template `NSImage` (symbol, 4 pt gap, time), as tidy and spaces do. It's monochrome like every extra: no red dot, so it never imitates the system's privacy indicators (§10).
 - Time format: `m:ss` under an hour, `h:mm:ss` after. Monospaced digits so the item doesn't jitter. The image redraws once a second.
 - The accessibility description updates once a minute, not every second, so VoiceOver isn't flooded.
-- The same glyph is used for audio and screen. The panel says which mode is running, and macOS's own indicator already signals screen capture.
+- The same glyph is used for audio and screen. The menu says which mode is running, and macOS's own indicator already signals screen capture.
 
-**Push back: no in-app "Show menu bar icon" setting.** The panel is Tape's main way to start or stop a recording, so offering to hide it invites an unusable app mid-call.
+**Push back: no in-app "Show menu bar icon" setting.** The menu is Tape's main way to start or stop a recording, so offering to hide it invites an unusable app mid-call.
 
 **But the icon can still disappear.** macOS 26 lets people turn any item off in System Settings › Menu Bar, and macOS hides extras that don't fit (the label widens when the time appears, which on a notched MacBook can push it out of view mid-call). HIG: don't rely on extras being visible, and provide alternate access. Tape's fallback is reopen:
 
@@ -68,65 +68,70 @@ There is no onboarding window, no notification, and no post-recording window. Re
 | Idle | Settings, as today |
 | Recording | The recording window: one line saying what's recording ("Recording audio" or `Recording "Microsoft Teams" and audio`), the elapsed time in monospaced digits, and a default-button **Stop Recording** (Return). Closes itself when the recording stops. Standard close button, no minimise or zoom |
 
-Why a separate window rather than a Stop row in Settings: Settings holds rarely changed preferences (HIG) and its General form is long; a live control buried in it is hard to find, and the window title would still read "General". The window is one tiny SwiftUI view reusing the panel's state, and it never appears unless asked for. Starting a recording without the icon isn't covered in v1; App Intents "Record Audio" and "Stop Recording" are the v1.x complement (§11).
+Why a separate window rather than a Stop row in Settings: Settings holds rarely changed preferences (HIG) and its General form is long; a live control buried in it is hard to find, and the window title would still read "General". The window is one tiny SwiftUI view reusing the menu's state, and it never appears unless asked for. Starting a recording without the icon isn't covered in v1; App Intents "Record Audio" and "Stop Recording" are the v1.x complement (§11).
 
-## 4. Panel
+## 4. Menu
 
-Clicking the label opens a Liquid Glass panel: `.menuBarExtraStyle(.window)`, whose own system `.regular` glass is the panel's only glass layer, with `.containerBackground(.clear, for: .window)` and the window toolbar hidden. Nothing inside the panel draws glass of its own: never glass inside glass. Controls in it are plain, borderless, bordered or link styles, and the one exception is the record button's tinted `.glassProminent`, Apple's style for a primary action inside glass. `-panelSnapshot` wraps the panel in `.glassEffect(.regular, in: .rect(cornerRadius: 16))` to stand in for the system glass, which an off-screen window doesn't get. 300 pt wide, its height follows the content. One layout with four states (idle, starting, recording, saving), so nothing jumps around when a recording starts or stops.
+Clicking the label opens a native menu built the way macOS 26's own extras (Wi-Fi, Bluetooth, Sound, Focus) build theirs: an `NSStatusItem` with an `NSMenu`, where the rows that need more than a title are `NSMenuItem.view = NSHostingView(rootView:)` with a SwiftUI view inside. SwiftUI's `MenuBarExtra` can't do this (its `.menu` style takes only plain items, its `.window` style is a panel, not a menu), so the status item and menu are the one place Tape uses AppKit for UI. The rows themselves stay SwiftUI. The menu is 300 pt wide (`minimumWidth`, and each custom row is 300 pt), its system menu material is the only background, and it is rebuilt in `menuNeedsUpdate`, so every open reflects the current state.
 
 ```
-Tape                          ⚙
-[ ◉  Record Audio            ]     one tinted prominent button
-  status line + action (optional)
-Reduce Echo              [  ◯]
-RECENT
-Today at 13:02         24:11  ⌕
-Today at 09:30         41:52  ⌕
-Yesterday at 16:45     12:03  ⌕
-  update row (optional)
+(●)  Record Audio                       custom row, grey badge
+     ⚠ status line (optional)           custom row, not selectable
+     Open Privacy Settings…             standard item (optional)
+──
+Reduce Echo                    [  ◯]    custom row with a switch
+──
+Recent                                  section header
+(≋)  Today at 13:02                     standard item: image, title,
+     24:11                                subtitle
+(≋)  Today at 09:30
+     41:52
+(≋)  Yesterday at 16:45
+     12:03
+──
+Open Recordings Folder
+Check for Updates…
+──
+Tape Settings…                      ⌘,
+──
+Quit Tape                           ⌘Q
 ```
 
-Why a panel instead of a menu: a menu is a snapshot, so the elapsed time lived only in the label, and recent recordings would have been a submenu of filenames. The panel shows the live timer, the recordings, and the toggle in their own controls, and it's one click to Record or Stop as before.
+Why a menu instead of the earlier panel: it's what a menu bar extra is (HIG: "display a menu, not a popover"), and it now behaves like the system's own: hover and arrow-key selection, type-select, ⌘, and ⌘Q, closing on click. What the panel added over the old plain menu (a live timer, the toggle, recent recordings with their durations) survives as custom rows and standard items with subtitles.
 
-### Header
+Only the rows that can't be standard items are custom views: Record (badge, live elapsed time, two detail lines), Reduce Echo (inline switch) and the status line (wraps to a second line). Everything else is a standard `NSMenuItem`, so it gets the system highlight, keyboard and VoiceOver behaviour for free. macOS 26 adds its own symbols to Settings… and Quit.
 
-| Item | Notes |
+### Custom rows
+
+| Part | Behaviour |
 |---|---|
-| "Tape" | Headline weight. The panel's title, so it reads like a system extra's panel (Wi-Fi, Bluetooth) |
-| ⚙ menu | Borderless `Menu` with the `gearshape` symbol, 28 pt hit area, no indicator. Tooltip and accessibility label "More". Items below |
+| Layout | 14 pt leading inset (badge or text), 4 pt vertical padding; titles 13 pt (`.body`), detail lines 11 pt (`.subheadline`) secondary, as in Wi-Fi's network rows |
+| Badge | A 28 pt circle with a white or primary glyph, Wi-Fi's style: tinted when active, a light neutral fill when not |
+| Selection | Custom views don't highlight themselves. `menu(_:willHighlight:)` records the highlighted item in an `@Observable` `MenuHighlight`, so mouse hover and arrow keys both reach the SwiftUI row, which draws `selectedContentBackgroundColor` in a rounded rect (8 pt radius, inset 5 pt) with `selectedMenuItemTextColor` text, to match the standard items around it |
+| Click | Custom views get mouse events but no action. A small `NSHostingView` subclass sends its item's action on mouse up (if the item is enabled), the same action Return sends on a highlighted item. Record's action cancels tracking first, so the menu closes like after any item |
+| Live updates | The Record row observes `Recorder`, so the elapsed time ticks while the menu is open: the recorder's 1 s timer is in `.common` run-loop modes and the observation hops via the main queue, both of which run during menu tracking. Structure (which rows exist) is fixed per open |
 
-| ⚙ item (idle) | ⚙ item (recording) | Notes |
+### Record row
+
+| State | Row | Detail lines |
 |---|---|---|
-| Settings… ⌘, | Settings… ⌘, | Activates Tape, closes the panel, opens Settings (the app-menu workaround from §1) |
-| Open Recordings Folder | Open Recordings Folder | The save folder, or Movies › Tape if it's gone |
-| ── | ── | |
-| Check for Updates… | Check for Updates… | rinse's `UpdateMenuItems`, unchanged: "Checking for Updates…"/"Downloading Update…" while busy (disabled), the result note ("Tape *x* is the latest version.", or why it can't update) as disabled text under it. When an update is staged the item reads "Install Tape *x* and Relaunch", or, while recording, "Tape *x* installs after recording" (disabled) |
-| ── | ── | |
-| Quit Tape ⌘Q | Stop and Quit Tape ⌘Q | The title says exactly what Quit will do, so no confirmation dialog is needed |
+| Idle | Grey badge with a `circle.fill` dot, "Record Audio" | None |
+| Starting (prompts, writer setup) | Same, dimmed and disabled, "Starting…" | None |
+| Recording | Red badge with `stop.fill`, "Stop Recording", live elapsed time trailing in monospaced digits | "Recording audio · since 14:03" (`· saving to Movies › Tape` appended when it fell back, §9). "Microphone: AirPods Pro", the live default input, or "Microphone unavailable" |
+| Saving (finalising, usually under 1 s) | Dimmed and disabled, "Saving…", the time frozen | Same lines as recording |
 
-### Record button
-
-A full-width `.glassProminent` button at `.controlSize(.extraLarge)` (about 36 pt) with a white label, the only prominent control in the panel (HIG: one prominent button per view).
-
-| State | Button | Under it |
-|---|---|---|
-| Idle | Tinted a calmer red (system red mixed 20% toward black): `record.circle.fill` + "Record Audio". Return activates it | Status line, if any |
-| Starting (prompts, writer setup) | Same, disabled, title "Starting…" | Nothing |
-| Recording | Same style tinted neutral gray (not red): `stop.fill` + "Stop Recording", and the live elapsed time trailing in monospaced digits. Return activates it | "Recording audio · since 14:03" (`· saving to Movies › Tape` appended when it fell back, §9). "Microphone: AirPods Pro", the live default input, or "Microphone unavailable". The "Reduce Echo couldn't start…" status line if it applies |
-| Saving (finalising, usually under 1 s) | Disabled, "Saving…", the time frozen | Same lines as recording |
-
-- Record and Stop are the same button, so it never moves: the QuickTime pattern, and there's only ever one recording. Record Screen… (§6, not built yet) will be a second, bordered button beside it, not a second prominent one and not glass.
-- The red tint is inside Tape's own panel, next to the word Record. It doesn't imitate the system privacy indicators (§10), which live in the menu bar.
-- **The panel stays open after Record.** The timer starting is the confirmation, and you can see the mic line is right. Clicking outside, Esc, or clicking the label closes it, as any panel. After Stop it also stays open and the new file appears at the top of Recent.
-- The first Record shows the macOS microphone prompt (§5), which takes focus, so the panel closes. That's the system's standard behaviour, and the label shows the recording once it starts.
+- Record and Stop are the same row, so it never moves, and it's the first item, where the down arrow lands first. Record Screen… (§6, not built yet) will be a second row under it.
+- The red badge only appears while recording, inside Tape's own menu next to the word Stop. It doesn't imitate the system privacy indicators (§10), which live in the menu bar.
+- **Record and Stop close the menu**, like any menu item. The label is the confirmation: it gains the time when recording starts and drops it when it stops. Reopen the menu to see the mic line or the new file at the top of Recent.
+- The first Record shows the macOS microphone prompt (§5).
 
 ### Status line
 
-At most one, directly under the button, in callout size with a leading SF Symbol: `exclamationmark.triangle` for problems, `info.circle` for information. Secondary text on the glass, no coloured background or bar. Each persists until the next recording starts or its cause is fixed. None of them ever repeats as a prompt. Highest priority first:
+At most one, directly under the Record row: a custom row (it wraps, which a standard item title can't) with a leading SF Symbol, `exclamationmark.triangle` for problems, `info.circle` for information, all in secondary text. It isn't selectable. When the fix is in System Settings, a standard "Open Privacy Settings…" item follows it. Each persists until the next recording starts or its cause is fixed. None of them ever repeats as a prompt. Highest priority first:
 
 | Condition | Line | Action |
 |---|---|---|
-| Microphone denied | Microphone access is off. | Open Privacy Settings… (link-style button under the text) |
+| Microphone denied | Microphone access is off. | Open Privacy Settings… |
 | System audio denied | System audio access is off. | Open Privacy Settings… |
 | Last recording was recovered after a crash | Recovered "Tape 2026-10-26 at 14.03.05". | (It's the first Recent row) |
 | Last recording stopped unexpectedly | Recording stopped: *reason* (§7) | (It's the first Recent row) |
@@ -137,42 +142,49 @@ At most one, directly under the button, in callout size with a leading SF Symbol
 
 ### Reduce Echo
 
-A row: the label "Reduce Echo" and a small switch (HIG: a switch in a list-style row; the row is its label). The same setting as in Settings (§12).
+A custom row laid out like Wi-Fi's header: "Reduce Echo" in bold on the left, a small switch on the right. The same setting as in Settings (§12). Clicking anywhere on the row flips the switch and keeps the menu open, as Wi-Fi's switch does (the switch itself ignores hits so a click never flips it twice). Return on the highlighted row flips it and closes the menu, like any item.
 
-- While recording or saving the switch is disabled and the row adds "Applies from the next recording." under the label, so it's clear why it's locked and that it still shows the setting.
+- While recording or saving the item is disabled, the switch dims, and the row adds "Applies from the next recording." under the label, so it's clear why it's locked and that it still shows the setting.
 
 ### Recent
 
-A "Recent" section header (callout, semibold, secondary), then the 3 newest recordings.
+A native section header (`NSMenuItem.sectionHeader(title: "Recent")`), then the 3 newest recordings as standard items.
 
 | Part | Behaviour |
 |---|---|
 | Source | Files named by Tape (`Tape yyyy-MM-dd at HH.mm.ss[ N].m4a/.mov`, parsed in TapeCore) in the save folder, plus the last recording wherever it is. That covers a recording that fell back to Movies › Tape and a recovered one. The in-progress file is left out while recording |
 | Order | Newest first, by the start time in the name (the filename is the start time, §9), not by file dates, which copying changes |
-| Row | Relative day and time ("Today at 13:02", "Yesterday at 16:45", "24 Oct 2026 at 12:03", the system's relative date formatting), the duration trailing in monospaced secondary digits (`m:ss`, `h:mm:ss`), and a trailing `magnifyingglass` glyph in tertiary |
-| Click | **Reveals the file in Finder** (selects it), the old "Show Last Recording in Finder". Not Open: Tape has no player, and opening launches Music or QuickTime, which isn't why people record a call. The files exist to be handed to other apps, which is what Finder (or a drag) is for. The magnifying glass is Safari's Downloads "Show in Finder" glyph |
-| Drag | A row drags its file, so it drops straight into ChatGPT, Mail or a chat |
-| Context menu | Open, Show in Finder |
-| Hover | A subtle rounded highlight (8 pt radius) across the row, like a system panel row |
-| Duration | Read with `AVURLAsset` off the main thread, cached by path and modification date, so opening the panel never waits. Until it's known the row shows no duration rather than a placeholder |
-| Refresh | Every time the panel opens and whenever a recording stops (so the new file and its final duration appear). The folder listing runs off the main thread too, since the folder can be on a network volume |
-| Deleted outside Tape | Gone at the next refresh. Clicking a row whose file has just gone refreshes the list instead of revealing nothing |
-| Empty | "No recordings yet." in secondary text under the header. The header stays, so the panel doesn't change shape after the first recording |
+| Item | Image: `waveform.circle.fill` in a neutral palette, the badge size of the Record row. Title: relative day and time ("Today at 13:02", "Yesterday at 16:45", "24 Oct 2026 at 12:03", the system's relative date formatting). Subtitle: the duration (`m:ss`, `h:mm:ss`). Tooltip "Show in Finder" |
+| Click | **Reveals the file in Finder** (selects it). Not Open: Tape has no player, and opening launches Music or QuickTime, which isn't why people record a call. The files exist to be handed to other apps, which is what Finder is for |
+| Drag, context menu | Not in a menu. Drag the file from the Finder window the click opens |
+| Duration | Read with `AVURLAsset` off the main thread, cached by path and modification date, so opening the menu never waits. Until it's known the item has no subtitle rather than a placeholder |
+| Refresh | Every time the menu opens and whenever a recording stops, off the main thread (the folder can be on a network volume). A refresh that finishes after the menu opened shows at the next open; the stop-time refresh keeps that rare |
+| Deleted outside Tape | Gone at the next refresh. Clicking an item whose file has just gone refreshes the list instead of revealing nothing |
+| Empty | "No recordings yet." as a disabled item under the header. The header stays, so the menu doesn't change shape after the first recording |
 
-### Update row
+### Standard items
 
-Only while an update is staged (`AppUpdater.staged`), at the bottom under a divider: "Tape *x* is ready." and an "Install and Relaunch" button (bordered, small; never prominent or glass, Record owns that). While recording the text reads "Tape *x* installs after recording." and the button is disabled. Other updater states stay in the ⚙ menu (above), so a routine "up to date" never takes space in the panel.
+| Item (idle) | Item (recording) | Notes |
+|---|---|---|
+| Open Recordings Folder | Open Recordings Folder | The save folder, or Movies › Tape if it's gone |
+| Check for Updates… | Check for Updates… | rinse's `UpdateMenuItems` semantics: "Checking for Updates…"/"Downloading Update…" while busy (disabled), the result note ("Tape *x* is the latest version.", or why it can't update) as a disabled item under it. When an update is staged the item reads "Install Tape *x* and Relaunch", or, while recording, "Tape *x* installs after recording" (disabled) |
+| ── | ── | |
+| Tape Settings… ⌘, | Tape Settings… ⌘, | Activates Tape and opens Settings (the app-menu workaround from §1). Named like Wi-Fi's "Wi-Fi Settings…" |
+| ── | ── | |
+| Quit Tape ⌘Q | Stop and Quit Tape ⌘Q | The title says exactly what Quit will do, so no confirmation dialog is needed |
 
 ### Keyboard
 
+Standard menu keyboard handling, nothing custom:
+
 | Key | Action |
 |---|---|
-| Return | Record Audio, or Stop Recording (the record button is the default button) |
-| Space | Presses the focused control, with keyboard navigation on (System Settings › Keyboard): Tab reaches the record button right after ⚙, then Space records or stops. Not a panel-wide Space shortcut: that would start a recording when Space is meant for the focused Reduce Echo switch or a Recent row |
+| ↓ / ↑ | Moves the selection, custom rows included (the status line is skipped). Record is first |
+| Return | Activates the selected item and closes the menu: Record or Stop, flip Reduce Echo, reveal a recording |
 | ⌘, | Settings |
 | ⌘Q | Quit Tape, or Stop and Quit while recording |
-| Esc | Closes the panel |
-| Tab | Moves through the controls, as in any window |
+| Esc | Closes the menu |
+| Typing | Type-select by item title (custom rows carry their title for this and for accessibility) |
 
 ### Pause: not in v1
 
@@ -200,13 +212,13 @@ Tape asks for nothing at launch (HIG: request only when the feature is used). No
 
 | Case | Behaviour |
 |---|---|
-| Mic denied at the prompt | Nothing starts and nothing else appears (the person just said no). The idle panel shows the status line from §4 |
+| Mic denied at the prompt | Nothing starts and nothing else appears (the person just said no). The idle menu shows the status line from §4 |
 | System audio denied at the prompt | Stop at once and delete the file (it holds only the mic, which §5 rules out as a recording). Label back to idle, status line from §4. Detected by the probe or, failing that, by the zero check below |
 | Record clicked while the mic is denied | Opens `x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone` directly. No alert, never a second nag |
 | System audio denied | The same pattern, opening `Privacy_ScreenCapture` (the pane holds the "System Audio Recording Only" list; verify the anchor) |
 | Both permissions required? | **Yes.** A call recording without the other side, or without you, is the wrong file. There's no mic-only or system-only mode in v1 |
-| Revoked while recording | If macOS terminates Tape, crash recovery applies (§8). If the mic simply goes silent, keep recording, and the mic line in the panel reads "Microphone unavailable" |
-| Granted later in System Settings | Picked up on `didBecomeActive` and the next panel open (any Tape window becoming key). The status line disappears |
+| Revoked while recording | If macOS terminates Tape, crash recovery applies (§8). If the mic simply goes silent, keep recording, and the mic line in the menu reads "Microphone unavailable" |
+| Granted later in System Settings | Picked up on `didBecomeActive` and the next menu open. The status line disappears |
 | System audio silent although "allowed" | After a stop, if the system track of a recording over 60 s was all digital zero, show "The last recording has no system audio." once. This catches a revoked permission that the API missed. A tap also delivers digital zero when nothing is playing, so a recording with no call audio at all triggers it falsely; acceptable, since Tape is for calls |
 
 Settings › General shows both rows using tinecast's `PermissionRow` pattern: label, reason, then a status ("Allowed" with a green checkmark, or "Not Allowed") and an "Open System Settings…" button when not allowed. "Allow…" only appears for the mic while it's still undetermined.
@@ -225,7 +237,7 @@ Settings › General shows both rows using tinecast's `PermissionRow` pattern: l
 
 Rule: **never stop because of a device change. Stop only when there's nothing left to record, then always finalise the file.**
 
-| Event | Behaviour | Panel afterwards |
+| Event | Behaviour | Menu afterwards |
 |---|---|---|
 | Stop Recording | Finalise, label back to idle | The file is the first Recent row. No status line |
 | Stopped from the system screen-sharing indicator | Treated exactly like Stop Recording | Same |
@@ -241,14 +253,14 @@ Rule: **never stop because of a device change. Stop only when there's nothing le
 | Disk nearly full (checked every 30 s, below 200 MB) or writer error | Finalise what exists | "Recording stopped: "*Volume*" is full." / "...couldn't write to the file." |
 | Save folder's volume ejected mid-recording | The writer errors, Tape keeps whatever fragments were written | "Recording stopped: "*Volume*" was disconnected." |
 
-The idle panel shows these unexpected stops passively. The label going back to idle is the live signal. No notification (decided, §16).
+The idle menu shows these unexpected stops passively. The label going back to idle is the live signal. No notification (decided, §16).
 
 ## 8. Quit, update, crash
 
 | Case | Behaviour |
 |---|---|
 | Stop and Quit, ⌘Q, logout, restart, shutdown | `applicationShouldTerminate` returns `.terminateLater`, finalises, then replies. Hard cap of 5 s, after which the fragmented file is still valid |
-| Update staged while recording | The ⚙ menu's install item is disabled and reads "Tape *x* installs after recording", and the panel's update row says the same with its button disabled (§4). After Stop they go back to "Install Tape *x* and Relaunch". The automatic `installOnQuit` runs in `applicationWillTerminate`, after finalising |
+| Update staged while recording | The menu's install item is disabled and reads "Tape *x* installs after recording" (§4). After Stop they go back to "Install Tape *x* and Relaunch". The automatic `installOnQuit` runs in `applicationWillTerminate`, after finalising |
 | Crash, force quit, power loss | Before the writer starts, store the in-progress file path in `UserDefaults`, and clear it on finalise. On next launch, if it's set and the file exists, keep the file (fragments make it playable), clear the marker, and make it the last recording |
 | Recovered file shorter than 1 s or unreadable | Delete it silently. Nothing worth keeping |
 
@@ -259,12 +271,12 @@ The recovered file keeps its original name. The status line reads: Recovered "Ta
 - **Default folder: `~/Movies/Tape`.** It's visible, so it can be fed to AI tools. Unlike Desktop and Documents, `~/Movies` isn't a TCC-protected folder (no third prompt), and it isn't synced by Desktop & Documents iCloud.
 - **Naming:** `Tape 2026-10-26 at 14.03.05.m4a` / `.mov`. This mirrors Screenshot's format, uses the start time, and sorts chronologically by name. A collision (same second) appends ` 2`.
 - The file gets its final name from the start. There's no temp file to move, so a crash leaves the file where people look.
-- **Feedback:** none beyond the label returning to idle, plus the file at the top of Recent in the panel. No notification, no Finder window, no floating thumbnail. Clicking Stop is the feedback.
+- **Feedback:** none beyond the label returning to idle, plus the file at the top of Recent in the menu. No notification, no Finder window, no floating thumbnail. Clicking Stop is the feedback.
 
 | Folder state at start | Behaviour |
 |---|---|
 | Default folder missing | Recreate it silently |
-| Custom folder missing (for example an unmounted drive) or unwritable | Record to `~/Movies/Tape` instead. The panel's "Recording audio" line adds "· saving to Movies › Tape". The idle status line explains the fallback afterwards. Losing the call is worse than a different folder |
+| Custom folder missing (for example an unmounted drive) or unwritable | Record to `~/Movies/Tape` instead. The menu's "Recording audio" line adds "· saving to Movies › Tape". The idle status line explains the fallback afterwards. Losing the call is worse than a different folder |
 | Less than 1 GB free (screen) or 500 MB (audio) | Don't start. Show the status line from §4 |
 
 ## 10. System indicators
@@ -276,7 +288,7 @@ The recovered file keeps its original name. The status line reads: Recovered "Ta
 ## 11. Keyboard
 
 - **No global shortcut in v1.** Hand-rolling `RegisterEventHotKey` is small, but it also needs a recorder UI, conflict handling, and a setting. That's not trivial, and it's against "easy".
-- The panel's own keys apply only while it's open: Return, ⌘, ⌘Q and Esc (§4).
+- The menu's own keys apply only while it's open: arrows, Return, ⌘, ⌘Q and Esc (§4).
 - **v1.x:** App Intents "Record Audio" and "Stop Recording". These give people a Shortcuts or Spotlight hotkey with no custom code, plus a way to *start* a recording when the icon is hidden (the recording window in §3 only covers stopping). Tape would be the right app for a Control Center control next (rinse already has the pattern).
 
 ## 12. Settings
@@ -299,12 +311,12 @@ Removed or never added: Show menu bar icon (§3), audio format and quality, file
 
 ## 13. Accessibility
 
-- Every panel control is a standard `Button`, `Toggle`, `Menu` or `Text`, so VoiceOver reads it as is. Status lines are full sentences, their symbols hidden from accessibility.
-- The record button reads "Record Audio", or "Stop Recording" with the elapsed time as its value (`ElapsedTime.spoken`, which changes once a minute, so a focused button doesn't chatter). The ⚙ menu is "More".
-- A Recent row is one element: "Today at 13:02, 24 minutes", hint "Shows the recording in Finder", with the context menu's Open and Show in Finder as its actions.
+- Every item is a standard `NSMenuItem`, or a custom row whose item carries the same title and whose SwiftUI content is plain `Text` and `Toggle`, so VoiceOver reads it as is. Status lines are full sentences, their symbols hidden from accessibility.
+- The Record row reads "Record Audio", or "Stop Recording" with the elapsed time spoken (`ElapsedTime.spoken`, which changes once a minute, so a focused row doesn't chatter).
+- A Recent item is a standard menu item: its title and its duration subtitle.
 - Label: see §3, updated per minute.
 - The label changes silently, so Tape posts a VoiceOver announcement (`AccessibilityNotification.Announcement`) "Recording started" and "Recording saved" (or the stop reason). Only VoiceOver users hear it.
-- The record button is the first control after the title, and Stop Recording takes its place, so it's reached with a single VO-Right.
+- The Record row is the first item, and Stop Recording takes its place, so it's the first thing VoiceOver reaches.
 - The permission rows hide their status icon from accessibility (the text carries it), as tinecast does.
 
 ## 14. Teams and Zoom interplay
@@ -318,7 +330,7 @@ Removed or never added: Show menu bar icon (§3), audio format and quality, file
 | Teams' own voice isolation or noise suppression | Affects only what Teams *sends*. Tape gets the raw mic. With voice processing on, macOS's Mic Mode (Control Center) also applies to Tape, where people can choose Voice Isolation themselves | No Tape UI |
 | AirPods already used by Teams as mic | Already in HFP (low quality) because of Teams. Tape opening the same mic changes nothing | None |
 | AirPods are output, but Teams uses another mic, and AirPods are the system default input | Tape opening the AirPods mic drops AirPods to HFP mid-call | Not handled in v1: Tape always uses the system default input. Change the default input in System Settings › Sound |
-| Teams muted | **Tape still records your mic.** Tape doesn't know about Teams' mute | Called out on the About tab and in the README. Not in the panel |
+| Teams muted | **Tape still records your mic.** Tape doesn't know about Teams' mute | Called out on the About tab and in the README. Not in the menu |
 | System sounds, other apps' audio | Recorded too, because the tap covers all processes except Tape | Per-app audio is out of scope |
 
 ## 15. Out of scope for v1
@@ -337,6 +349,6 @@ Removed or never added: Show menu bar icon (§3), audio format and quality, file
 ## 16. Decided
 
 - System audio through a Core Audio process tap; ScreenCaptureKit only for screen video via the system picker.
-- Unexpected stops are shown passively in the panel (§4, §7). No notifications.
+- Unexpected stops are shown passively in the menu (§4, §7). No notifications.
 - Default folder `~/Movies/Tape`.
 - Tape always records the system default input. There's no microphone picker in v1: it follows whatever System Settings › Sound uses, including changes mid-recording.

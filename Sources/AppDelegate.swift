@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let updater = AppUpdater()
     let recorder = Recorder(settings: .shared)
     private(set) lazy var recent = RecentRecordings(settings: .shared, recorder: recorder)
+    private lazy var statusMenu = StatusMenu(recorder: recorder, settings: .shared, updater: updater, recent: recent)
     private var observers: [NSObjectProtocol] = []
     private lazy var recordingWindow: NSWindow = {
         let window = NSWindow(contentViewController: NSHostingController(rootView: RecordingView(recorder: recorder)))
@@ -26,11 +27,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await LabelSnapshot.capture(to: output, recorder: recorder) }
             return
         }
-        if let output = PanelSnapshot.output {
-            Task { await PanelSnapshot.capture(to: output, recorder: recorder, updater: updater, recent: recent) }
+        if let output = MenuSnapshot.output {
+            Task { await MenuSnapshot.capture(to: output, recorder: recorder, updater: updater, recent: recent) }
             return
         }
         #endif
+        statusMenu.install()
         updater.isInstallBlocked = { [recorder] in recorder.isActive }
         updater.start()
         Task { await recorder.recoverInterruptedRecording() }

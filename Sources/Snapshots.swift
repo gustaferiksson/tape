@@ -67,12 +67,14 @@ enum LabelSnapshot {
 }
 
 @MainActor
-enum PanelSnapshot {
-    nonisolated static let output = UserDefaults.standard.string(forKey: "panelSnapshot").map { URL(filePath: $0, directoryHint: .isDirectory) }
+enum MenuSnapshot {
+    nonisolated static let output = UserDefaults.standard.string(forKey: "menuSnapshot").map { URL(filePath: $0, directoryHint: .isDirectory) }
 
+    // Off screen only the custom-view rows and item images can be drawn; standard items are printed as an outline.
     static func capture(to directory: URL, recorder: Recorder, updater: AppUpdater, recent: RecentRecordings) async {
         SnapshotCapture.prepare()
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let statusMenu = StatusMenu(recorder: recorder, settings: .shared, updater: updater, recent: recent)
         let today = Calendar.current.startOfDay(for: .now)
         let recordings = [
             RecentRecordings.Item(url: URL(filePath: "/a.m4a"), startedAt: today.addingTimeInterval(13 * 3600 + 120), duration: 1451),
@@ -80,59 +82,73 @@ enum PanelSnapshot {
             RecentRecordings.Item(url: URL(filePath: "/c.m4a"), startedAt: today.addingTimeInterval(-7 * 3600), duration: 4983),
         ]
         let started = Date.now.addingTimeInterval(-1451)
-        let scenarios: [(name: String, since: Date?, notice: Notice?, staged: String?, items: [RecentRecordings.Item])] = [
-            ("idle", nil, nil, nil, recordings),
-            ("recording", started, nil, nil, recordings),
-            ("recording-notice", started, .reduceEchoUnavailable, "0.3.0", recordings),
-            ("notice", nil, .microphoneDenied, nil, recordings),
-            ("notice-info", nil, .fellBack(folder: "Call Recordings"), nil, recordings),
-            ("update", nil, nil, "0.3.0", recordings),
-            ("empty", nil, nil, nil, []),
+        let scenarios: [(name: String, since: Date?, notice: Notice?, staged: String?, items: [RecentRecordings.Item], highlighted: NSUserInterfaceItemIdentifier?)] = [
+            ("idle", nil, nil, nil, recordings, nil),
+            ("idle-record-highlighted", nil, nil, nil, recordings, StatusMenu.recordItem),
+            ("idle-echo-highlighted", nil, nil, nil, recordings, StatusMenu.reduceEchoItem),
+            ("recording", started, nil, nil, recordings, nil),
+            ("recording-highlighted", started, nil, nil, recordings, StatusMenu.recordItem),
+            ("recording-notice", started, .reduceEchoUnavailable, "0.3.0", recordings, nil),
+            ("notice", nil, .microphoneDenied, nil, recordings, nil),
+            ("notice-info", nil, .fellBack(folder: "Call Recordings"), nil, recordings, nil),
+            ("update", nil, nil, "0.3.0", recordings, nil),
+            ("empty", nil, nil, nil, [], nil),
         ]
         for scenario in scenarios {
             recorder.simulate(since: scenario.since, microphone: scenario.since == nil ? nil : "AirPods Pro", notice: scenario.notice)
             updater.simulateStaged(scenario.staged)
             recent.simulate(scenario.items)
+            statusMenu.rebuild()
+            statusMenu.highlight.item = scenario.highlighted
+            print("menu-\(scenario.name):")
+            for item in statusMenu.menu.items {
+                print("  \(outline(of: item))")
+            }
             for (appearance, suffix) in [(NSAppearance.Name.aqua, "light"), (.darkAqua, "dark")] {
-                for backdrop in Backdrop.allCases {
-                    let panel = TapePanel(recorder: recorder, settings: .shared, updater: updater, recent: recent)
-                        .glassEffect(.regular, in: .rect(cornerRadius: 16))
-                        .environment(\.controlActiveState, .key)
-                        .environment(\.appearsActive, true)
-                        .padding(24)
-                        .background { backdrop }
-                    let window = UnconstrainedWindow(contentRect: .zero, styleMask: [.borderless], backing: .buffered, defer: false)
-                    window.contentView = NSHostingView(rootView: panel)
-                    window.setContentSize(window.contentView?.fittingSize ?? .zero)
-                    window.backgroundColor = .windowBackgroundColor
-                    window.appearance = NSAppearance(named: appearance)
-                    guard await SnapshotCapture.write(window, to: directory.appending(path: "panel-\(scenario.name)-\(suffix)\(backdrop.suffix).png")) else { fail(#line) }
-                }
+                let background = menuBackground(rows: statusMenu.menu.items.compactMap { $0.view ?? $0.image.map(imageView) })
+                let window = UnconstrainedWindow(contentRect: background.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+                window.contentView = background
+                window.appearance = NSAppearance(named: appearance)
+                guard await SnapshotCapture.write(window, to: directory.appending(path: "menu-\(scenario.name)-\(suffix).png")) else { fail(#line) }
             }
         }
         exit(0)
     }
-}
 
-private enum Backdrop: CaseIterable, View {
-    case gradient, terminal, document
-
-    var suffix: String {
-        if self == .gradient { return "" }
-        return "-\(self)"
+    private static func outline(of item: NSMenuItem) -> String {
+        if item.isSeparatorItem { return "──" }
+        let kind = item.view != nil ? "view" : item.isSectionHeader ? "header" : "item"
+        let details = [
+            item.subtitle.map { "subtitle \"\($0)\"" },
+            item.keyEquivalent.isEmpty ? nil : "⌘\(item.keyEquivalent.uppercased())",
+            item.isEnabled ? nil : "disabled",
+            item.image == nil ? nil : "image",
+        ].compactMap { $0 }
+        return "[\(kind)] \(item.title)\(details.isEmpty ? "" : " (\(details.joined(separator: ", ")))")"
     }
 
-    var body: some View {
-        if self == .gradient {
-            LinearGradient(colors: [.orange, .pink, .purple, .blue], startPoint: .topLeading, endPoint: .bottomTrailing)
-        } else {
-            let isDark = self == .terminal
-            Text(String(repeating: "drwxr-xr-x  12 gustaf  staff  384 Oct 27 09:41 Sources  ~/Repos/Gustaf/tape (more-glass) $ swift test --package-path Packages/TapeCore ", count: 40))
-                .font(.system(size: 13, design: .monospaced))
-                .foregroundStyle(isDark ? Color.green.opacity(0.9) : Color.black.opacity(0.85))
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .background(isDark ? Color(white: 0.08) : .white)
+    private static func imageView(_ image: NSImage) -> NSView {
+        let view = NSImageView(frame: NSRect(origin: .zero, size: image.size))
+        view.image = image
+        return view
+    }
+
+    private static func menuBackground(rows: [NSView]) -> NSView {
+        let gap: CGFloat = 12
+        let height = rows.map(\.frame.height).reduce(gap, +) + gap * CGFloat(rows.count)
+        let background = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: StatusMenu.width, height: height))
+        background.material = .menu
+        background.state = .active
+        var top = height - gap
+        for row in rows {
+            let slot = NSView(frame: NSRect(x: 0, y: top - row.frame.height, width: row.frame.width, height: row.frame.height))
+            row.removeFromSuperview()
+            row.setFrameOrigin(.zero)
+            slot.addSubview(row)
+            background.addSubview(slot)
+            top -= row.frame.height + gap
         }
+        return background
     }
 }
 
