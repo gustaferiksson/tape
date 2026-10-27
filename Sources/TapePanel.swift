@@ -123,6 +123,7 @@ struct TapePanel: View {
     }
 
     private func showSettings() {
+        NSApp.activate()
         NSApp.keyWindow?.close()
         showSettingsWindow()
     }
@@ -266,7 +267,7 @@ private struct RecentRow: View {
     }
 }
 
-struct UpdateMenuItems: View {
+private struct UpdateMenuItems: View {
     let updater: AppUpdater
     let isRecording: Bool
 
