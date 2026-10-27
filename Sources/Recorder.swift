@@ -28,7 +28,7 @@ final class Recorder {
     @ObservationIgnored private var session: CaptureSession?
     @ObservationIgnored private var sessionID: UUID?
     @ObservationIgnored private var lastDiskCheck = Date.distantPast
-    @ObservationIgnored private(set) var recordingURL: URL?
+    @ObservationIgnored private var recordingURL: URL?
     @ObservationIgnored private var recordingVolume = ""
     @ObservationIgnored private var fallbackFrom: String?
     @ObservationIgnored private var timer: Timer?

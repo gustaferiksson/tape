@@ -37,7 +37,7 @@ final class RecentRecordings {
         #endif
         scan?.cancel()
         let folder = settings.saveFolder, last = recorder.lastRecording, cache = durations
-        let current = recorder.isActive ? recorder.recordingURL : nil
+        let current = recorder.phase == .idle ? nil : (settings.store.dictionary(forKey: "inProgressRecording")?["path"] as? String).map { URL(filePath: $0) }
         scan = Task {
             let (items, durations) = await Self.scan(folder: folder, including: last, excluding: current, cache: cache)
             guard !Task.isCancelled else { return }
