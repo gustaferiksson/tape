@@ -82,22 +82,23 @@ enum MenuSnapshot {
             RecentRecordings.Item(url: URL(filePath: "/c.m4a"), startedAt: today.addingTimeInterval(-7 * 3600), duration: 4983),
         ]
         let started = Date.now.addingTimeInterval(-1451)
-        let scenarios: [(name: String, since: Date?, notice: Notice?, staged: String?, items: [RecentRecordings.Item], highlighted: NSUserInterfaceItemIdentifier?)] = [
-            ("idle", nil, nil, nil, recordings, nil),
-            ("idle-record-highlighted", nil, nil, nil, recordings, StatusMenu.recordItem),
-            ("idle-echo-highlighted", nil, nil, nil, recordings, StatusMenu.reduceEchoItem),
-            ("recording", started, nil, nil, recordings, nil),
-            ("recording-highlighted", started, nil, nil, recordings, StatusMenu.recordItem),
-            ("recording-notice", started, .reduceEchoUnavailable, "0.3.0", recordings, nil),
-            ("notice", nil, .microphoneDenied, nil, recordings, nil),
-            ("notice-info", nil, .fellBack(folder: "Call Recordings"), nil, recordings, nil),
-            ("update", nil, nil, "0.3.0", recordings, nil),
-            ("empty", nil, nil, nil, [], nil),
+        let scenarios: [(name: String, since: Date?, notice: Notice?, staged: String?, items: [RecentRecordings.Item], highlighted: NSUserInterfaceItemIdentifier?, reducesEcho: Bool)] = [
+            ("idle", nil, nil, nil, recordings, nil, false),
+            ("idle-record-highlighted", nil, nil, nil, recordings, StatusMenu.recordItem, true),
+            ("idle-echo-highlighted", nil, nil, nil, recordings, StatusMenu.reduceEchoItem, true),
+            ("recording", started, nil, nil, recordings, nil, true),
+            ("recording-highlighted", started, nil, nil, recordings, StatusMenu.recordItem, true),
+            ("recording-notice", started, .reduceEchoUnavailable, "0.3.0", recordings, nil, true),
+            ("notice", nil, .microphoneDenied, nil, recordings, nil, true),
+            ("notice-info", nil, .fellBack(folder: "Call Recordings"), nil, recordings, nil, true),
+            ("update", nil, nil, "0.3.0", recordings, nil, true),
+            ("empty", nil, nil, nil, [], nil, false),
         ]
         for scenario in scenarios {
             recorder.simulate(since: scenario.since, microphone: scenario.since == nil ? nil : "AirPods Pro", notice: scenario.notice)
             updater.simulateStaged(scenario.staged)
             recent.simulate(scenario.items)
+            AppSettings.shared.reducesEcho = scenario.reducesEcho
             statusMenu.rebuild()
             statusMenu.highlight.item = scenario.highlighted
             print("menu-\(scenario.name):")
@@ -105,7 +106,7 @@ enum MenuSnapshot {
                 print("  \(outline(of: item))")
             }
             for (appearance, suffix) in [(NSAppearance.Name.aqua, "light"), (.darkAqua, "dark")] {
-                let background = menuBackground(rows: statusMenu.menu.items.compactMap { $0.view ?? $0.image.map(imageView) })
+                let background = menuBackground(rows: statusMenu.menu.items.compactMap(row(for:)))
                 let window = UnconstrainedWindow(contentRect: background.frame, styleMask: [.borderless], backing: .buffered, defer: false)
                 window.contentView = background
                 window.appearance = NSAppearance(named: appearance)
@@ -122,9 +123,21 @@ enum MenuSnapshot {
             item.subtitle.map { "subtitle \"\($0)\"" },
             item.keyEquivalent.isEmpty ? nil : "⌘\(item.keyEquivalent.uppercased())",
             item.isEnabled ? nil : "disabled",
-            item.image == nil ? nil : "image",
+            item.image == nil ? nil : imageVisibility(of: item),
         ].compactMap { $0 }
         return "[\(kind)] \(item.title)\(details.isEmpty ? "" : " (\(details.joined(separator: ", ")))")"
+    }
+
+    private static func row(for item: NSMenuItem) -> NSView? {
+        if let view = item.view { return view }
+        if #available(macOS 27, *), item.preferredImageVisibility == .hidden { return nil }
+        return item.image.map(imageView)
+    }
+
+    private static func imageVisibility(of item: NSMenuItem) -> String {
+        guard #available(macOS 27, *) else { return "image" }
+        if item.preferredImageVisibility == .hidden { return "image hidden" }
+        return item.preferredImageVisibility == .visible ? "image visible" : "image automatic"
     }
 
     private static func imageView(_ image: NSImage) -> NSView {

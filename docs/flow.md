@@ -75,11 +75,10 @@ Why a separate window rather than a Stop row in Settings: Settings holds rarely 
 Clicking the label opens a native menu built the way macOS 26's own extras (Wi-Fi, Bluetooth, Sound, Focus) build theirs: an `NSStatusItem` with an `NSMenu`, where the rows that need more than a title are `NSMenuItem.view = NSHostingView(rootView:)` with a SwiftUI view inside. SwiftUI's `MenuBarExtra` can't do this (its `.menu` style takes only plain items, its `.window` style is a panel, not a menu), so the status item and menu are the one place Tape uses AppKit for UI. The rows themselves stay SwiftUI. The menu is 300 pt wide (`minimumWidth`, and each custom row is 300 pt), its system menu material is the only background, and it is rebuilt in `menuNeedsUpdate`, so every open reflects the current state.
 
 ```
-(●)  Record Audio                       custom row, grey badge
+(●)  Record Audio                       custom row, red badge
      ⚠ status line (optional)           custom row, not selectable
      Open Privacy Settings…             standard item (optional)
-──
-Reduce Echo                    [  ◯]    custom row with a switch
+Reduce Echo                       [◯]   custom row with a switch
 ──
 Recent                                  section header
 (≋)  Today at 13:02                     standard item: image, title,
@@ -88,25 +87,24 @@ Recent                                  section header
      41:52
 (≋)  Yesterday at 16:45
      12:03
+Show All Recordings…
 ──
-Open Recordings Folder
-Check for Updates…
-──
+Install Tape 0.x and Relaunch           only when an update is staged
 Tape Settings…                      ⌘,
-──
 Quit Tape                           ⌘Q
 ```
 
 Why a menu instead of the earlier panel: it's what a menu bar extra is (HIG: "display a menu, not a popover"), and it now behaves like the system's own: hover and arrow-key selection, type-select, ⌘, and ⌘Q, closing on click. What the panel added over the old plain menu (a live timer, the toggle, recent recordings with their durations) survives as custom rows and standard items with subtitles.
 
-Only the rows that can't be standard items are custom views: Record (badge, live elapsed time, two detail lines), Reduce Echo (inline switch) and the status line (wraps to a second line). Everything else is a standard `NSMenuItem`, so it gets the system highlight, keyboard and VoiceOver behaviour for free. macOS 26 adds its own symbols to Settings… and Quit.
+Only the rows that can't be standard items are custom views: Record (badge, live elapsed time, two detail lines), Reduce Echo (inline switch) and the status line (wraps to a second line). Everything else is a standard `NSMenuItem`, so it gets the system highlight, keyboard and VoiceOver behaviour for free. macOS assigns its own symbols to Settings… and Quit (and macOS 27 shows only some of them), so the action items hide their images (`preferredImageVisibility = .hidden` on 27) and the menu has no symbols outside its badges, like Wi-Fi's. The Recent badges ask for `.visible`.
 
 ### Custom rows
 
 | Part | Behaviour |
 |---|---|
 | Layout | 14 pt leading inset (badge or text), 4 pt vertical padding; titles 13 pt (`.body`), detail lines 11 pt (`.subheadline`) secondary, as in Wi-Fi's network rows |
-| Badge | A 28 pt circle with a white or primary glyph, Wi-Fi's style: tinted when active, a light neutral fill when not |
+| Badge | A 28 pt red circle with a white glyph, Wi-Fi's style of a coloured badge. It stays red on the selection highlight |
+| Colour in the menu | The menu window is never key in an active app, so AppKit controls inside it draw inactive: an `NSSwitch` (SwiftUI's `.switch` toggle style) loses its accent tint, and neither `.tint`, `\.appearsActive` nor `\.controlActiveState` changes that. Plain SwiftUI fills keep their colour, so the switch is drawn as a small SwiftUI capsule in the accent colour (28×16 pt, white knob; on the selection highlight a translucent white track) |
 | Selection | Custom views don't highlight themselves. `menu(_:willHighlight:)` records the highlighted item in an `@Observable` `MenuHighlight`, so mouse hover and arrow keys both reach the SwiftUI row, which draws `selectedContentBackgroundColor` in a rounded rect (8 pt radius, inset 5 pt) with `selectedMenuItemTextColor` text, to match the standard items around it |
 | Click | Custom views get mouse events but no action. A small `NSHostingView` subclass sends its item's action on mouse up (if the item is enabled), the same action Return sends on a highlighted item. Record's action cancels tracking first, so the menu closes like after any item |
 | Live updates | The Record row observes `Recorder`, so the elapsed time ticks while the menu is open: the recorder's 1 s timer is in `.common` run-loop modes and the observation hops via the main queue, both of which run during menu tracking. Structure (which rows exist) is fixed per open |
@@ -115,13 +113,13 @@ Only the rows that can't be standard items are custom views: Record (badge, live
 
 | State | Row | Detail lines |
 |---|---|---|
-| Idle | Grey badge with a `circle.fill` dot, "Record Audio" | None |
+| Idle | Red badge with a white `circle.fill` dot, "Record Audio" | None |
 | Starting (prompts, writer setup) | Same, dimmed and disabled, "Starting…" | None |
 | Recording | Red badge with `stop.fill`, "Stop Recording", live elapsed time trailing in monospaced digits | "Recording audio · since 14:03" (`· saving to Movies › Tape` appended when it fell back, §9). "Microphone: AirPods Pro", the live default input, or "Microphone unavailable" |
 | Saving (finalising, usually under 1 s) | Dimmed and disabled, "Saving…", the time frozen | Same lines as recording |
 
 - Record and Stop are the same row, so it never moves, and it's the first item, where the down arrow lands first. Record Screen… (§6, not built yet) will be a second row under it.
-- The red badge only appears while recording, inside Tape's own menu next to the word Stop. It doesn't imitate the system privacy indicators (§10), which live in the menu bar.
+- The red badge is Tape's record colour inside its own menu, next to the words Record and Stop. It doesn't imitate the system privacy indicators (§10), which live in the menu bar.
 - **Record and Stop close the menu**, like any menu item. The label is the confirmation: it gains the time when recording starts and drops it when it stops. Reopen the menu to see the mic line or the new file at the top of Recent.
 - The first Record shows the macOS microphone prompt (§5).
 
@@ -142,13 +140,13 @@ At most one, directly under the Record row: a custom row (it wraps, which a stan
 
 ### Reduce Echo
 
-A custom row laid out like Wi-Fi's header: "Reduce Echo" in bold on the left, a small switch on the right. The same setting as in Settings (§12). Clicking anywhere on the row flips the switch and keeps the menu open, as Wi-Fi's switch does (the switch itself ignores hits so a click never flips it twice). Return on the highlighted row flips it and closes the menu, like any item.
+A custom row directly under Record, the height of a standard item: "Reduce Echo" in the regular menu font on the left, a mini switch on the right. The same setting as in Settings (§12). Clicking anywhere on the row flips the switch and keeps the menu open, as Wi-Fi's switch does (the switch itself ignores hits so a click never flips it twice). Return on the highlighted row flips it and closes the menu, like any item.
 
 - While recording or saving the item is disabled, the switch dims, and the row adds "Applies from the next recording." under the label, so it's clear why it's locked and that it still shows the setting.
 
 ### Recent
 
-A native section header (`NSMenuItem.sectionHeader(title: "Recent")`), then the 3 newest recordings as standard items.
+A native section header (`NSMenuItem.sectionHeader(title: "Recent")`), then the 3 newest recordings as standard items, then "Show All Recordings…", which opens the save folder (or Movies › Tape if it's gone).
 
 | Part | Behaviour |
 |---|---|
@@ -160,17 +158,14 @@ A native section header (`NSMenuItem.sectionHeader(title: "Recent")`), then the 
 | Duration | Read with `AVURLAsset` off the main thread, cached by path and modification date, so opening the menu never waits. Until it's known the item has no subtitle rather than a placeholder |
 | Refresh | Every time the menu opens and whenever a recording stops, off the main thread (the folder can be on a network volume). A refresh that finishes after the menu opened shows at the next open; the stop-time refresh keeps that rare |
 | Deleted outside Tape | Gone at the next refresh. Clicking an item whose file has just gone refreshes the list instead of revealing nothing |
-| Empty | "No recordings yet." as a disabled item under the header. The header stays, so the menu doesn't change shape after the first recording |
+| Empty | "No recordings yet." as a disabled item under the header, then Show All Recordings…. The header stays, so the menu doesn't change shape after the first recording |
 
 ### Standard items
 
 | Item (idle) | Item (recording) | Notes |
 |---|---|---|
-| Open Recordings Folder | Open Recordings Folder | The save folder, or Movies › Tape if it's gone |
-| Check for Updates… | Check for Updates… | rinse's `UpdateMenuItems` semantics: "Checking for Updates…"/"Downloading Update…" while busy (disabled), the result note ("Tape *x* is the latest version.", or why it can't update) as a disabled item under it. When an update is staged the item reads "Install Tape *x* and Relaunch", or, while recording, "Tape *x* installs after recording" (disabled) |
-| ── | ── | |
+| Install Tape *x* and Relaunch | Tape *x* installs after recording (disabled) | Only when the updater's scheduled check has downloaded an update; otherwise there is no update item. Check for Updates lives in Settings › General |
 | Tape Settings… ⌘, | Tape Settings… ⌘, | Activates Tape and opens Settings (the app-menu workaround from §1). Named like Wi-Fi's "Wi-Fi Settings…" |
-| ── | ── | |
 | Quit Tape ⌘Q | Stop and Quit Tape ⌘Q | The title says exactly what Quit will do, so no confirmation dialog is needed |
 
 ### Keyboard

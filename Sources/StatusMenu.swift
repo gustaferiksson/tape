@@ -21,7 +21,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         return formatter
     }()
 
-    // Drawn per appearance, like the SwiftUI MenuBadge on the Record row.
+    // Drawn per appearance, so the neutral fill follows light and dark.
     private static let recentBadge = NSImage(size: NSSize(width: 28, height: 28), flipped: false) { @Sendable rect in
         NSColor.labelColor.withAlphaComponent(0.1).setFill()
         NSBezierPath(ovalIn: rect).fill()
@@ -92,16 +92,18 @@ final class StatusMenu: NSObject, NSMenuDelegate {
                 items.append(actionItem("Open Privacy Settings…", #selector(openPrivacySettings), value: pane.url))
             }
         }
-        items += [.separator(), reduceEchoItem(), .separator(), .sectionHeader(title: "Recent")]
+        items += [reduceEchoItem(), .separator(), .sectionHeader(title: "Recent")]
         if let recordings = recent.items {
             items += recordings.isEmpty ? [disabledItem("No recordings yet.")] : recordings.map(recentItem)
         }
-        items += [.separator(), actionItem("Open Recordings Folder", #selector(openRecordingsFolder))]
-        items += updateItems(isRecording: isActive)
+        items += [actionItem("Show All Recordings…", #selector(openRecordingsFolder)), .separator()]
+        if let staged = updater.staged {
+            let install = actionItem(isActive ? "Tape \(staged.version) installs after recording" : "Install Tape \(staged.version) and Relaunch", #selector(installUpdate))
+            install.isEnabled = !isActive
+            items.append(install)
+        }
         items += [
-            .separator(),
             actionItem("Tape Settings…", #selector(openSettings), key: ","),
-            .separator(),
             actionItem(isActive ? "Stop and Quit Tape" : "Quit Tape", #selector(NSApplication.terminate(_:)), key: "q", target: NSApp),
         ]
         menu.items = items
@@ -131,31 +133,9 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         let item = actionItem(Self.dateFormatter.string(from: recording.startedAt), #selector(revealRecording), value: recording.url)
         item.subtitle = recording.duration.map(ElapsedTime.clock)
         item.image = Self.recentBadge
+        if #available(macOS 27, *) { item.preferredImageVisibility = .visible }
         item.toolTip = "Show in Finder"
         return item
-    }
-
-    private func updateItems(isRecording: Bool) -> [NSMenuItem] {
-        let primary = if let staged = updater.staged {
-            actionItem(isRecording ? "Tape \(staged.version) installs after recording" : "Install Tape \(staged.version) and Relaunch", #selector(installUpdate))
-        } else {
-            actionItem(updateCheckTitle, #selector(checkForUpdates))
-        }
-        primary.isEnabled = updater.staged == nil ? !updater.isBusy : !isRecording
-        return [primary] + [updateNote.map(disabledItem)].compactMap { $0 }
-    }
-
-    private var updateCheckTitle: String {
-        if updater.status == .checking { return "Checking for Updates…" }
-        if updater.status == .downloading { return "Downloading Update…" }
-        return "Check for Updates…"
-    }
-
-    private var updateNote: String? {
-        if case .upToDate(let version) = updater.status { return "Tape \(version) is the latest version." }
-        if case .blocked(let message) = updater.status { return message }
-        if case .failed(let message) = updater.status { return message }
-        return nil
     }
 
     private func viewItem(_ view: NSView) -> NSMenuItem {
@@ -170,6 +150,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
         item.target = target ?? self
         item.representedObject = value
+        // macOS assigns symbols to items like Settings… and Quit, and 27 shows only some of them; Wi-Fi's menu shows none.
+        if #available(macOS 27, *) { item.preferredImageVisibility = .hidden }
         return item
     }
 
@@ -211,10 +193,6 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     @objc private func installUpdate() {
         updater.installAndRelaunch()
-    }
-
-    @objc private func checkForUpdates() {
-        updater.check(.manual)
     }
 
     @objc private func openSettings() {
