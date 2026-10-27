@@ -77,6 +77,7 @@ enum PanelSnapshot {
                 let panel = TapePanel(recorder: recorder, settings: .shared, updater: updater, recent: recent)
                     .environment(\.controlActiveState, .key)
                     .padding(24)
+                    .background(LinearGradient(colors: [.orange, .pink, .purple, .blue], startPoint: .topLeading, endPoint: .bottomTrailing))
                 let window = UnconstrainedWindow(contentRect: .zero, styleMask: [.borderless], backing: .buffered, defer: false)
                 window.contentView = NSHostingView(rootView: panel)
                 window.setContentSize(window.contentView?.fittingSize ?? .zero)
@@ -98,9 +99,6 @@ func fail(_ line: Int) -> Never {
 enum SnapshotCapture {
     static func prepare() {
         NSApp.setActivationPolicy(.prohibited)
-        // Activating would take focus from the person's app, but inactive apps draw prominent and tinted controls grey.
-        let isActive: @convention(block) (NSApplication) -> Bool = { _ in true }
-        class_replaceMethod(NSApplication.self, #selector(getter: NSApplication.isActive), imp_implementationWithBlock(isActive), "c@:")
         if UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark" { NSApp.appearance = NSAppearance(named: .darkAqua) }
     }
 

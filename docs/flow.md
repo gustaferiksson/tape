@@ -167,7 +167,7 @@ Only while an update is staged (`AppUpdater.staged`), at the bottom under a divi
 | Key | Action |
 |---|---|
 | Return | Record Audio, or Stop Recording (the record button is the default button) |
-| Space | Presses the focused control. The record button takes initial focus, so with keyboard navigation on (System Settings › Keyboard) Space records or stops. Not a panel-wide Space shortcut: that would start a recording when Space is meant for the focused Reduce Echo switch or a Recent row |
+| Space | Presses the focused control, with keyboard navigation on (System Settings › Keyboard): Tab reaches the record button right after ⚙, then Space records or stops. Not a panel-wide Space shortcut: that would start a recording when Space is meant for the focused Reduce Echo switch or a Recent row |
 | ⌘, | Settings |
 | ⌘Q | Quit Tape, or Stop and Quit while recording |
 | Esc | Closes the panel |

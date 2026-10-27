@@ -55,7 +55,7 @@ struct TapePanel: View {
             .help("More")
             .accessibilityLabel("More")
         }
-        .frame(height: 28)
+        .frame(height: 24)
         .padding(.trailing, -6)
     }
 
@@ -139,7 +139,7 @@ private struct RecordButton: View {
         if recorder.startedAt == nil {
             Button { Task { await recorder.start() } } label: {
                 Label(recorder.phase == .starting ? "Starting…" : "Record Audio", systemImage: "record.circle.fill")
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity, minHeight: 24)
             }
             .buttonStyle(.glassProminent)
             .tint(.red)
@@ -153,6 +153,7 @@ private struct RecordButton: View {
                     Spacer()
                     Text(ElapsedTime.clock(recorder.elapsed)).monospacedDigit()
                 }
+                .frame(minHeight: 24)
             }
             .buttonStyle(.glass)
             .controlSize(.extraLarge)
@@ -170,6 +171,7 @@ private struct NoticeLine: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Label(notice.text, systemImage: symbol)
+                .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             if let pane = notice.privacyPane {
                 Button("Open Privacy Settings…") { NSWorkspace.shared.open(pane.url) }
@@ -178,7 +180,6 @@ private struct NoticeLine: View {
             }
         }
         .font(.callout)
-        .foregroundStyle(.secondary)
     }
 
     private var symbol: String {
