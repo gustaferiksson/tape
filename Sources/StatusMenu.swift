@@ -10,6 +10,7 @@ final class MenuHighlight {
 @MainActor
 final class StatusMenu: NSObject, NSMenuDelegate {
     static let width: CGFloat = 300
+    static let badgeSize: CGFloat = 26
     static let recordItem = NSUserInterfaceItemIdentifier("record")
     static let reduceEchoItem = NSUserInterfaceItemIdentifier("reduceEcho")
 
@@ -22,11 +23,11 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     }()
 
     // Drawn per appearance, so the neutral fill follows light and dark.
-    private static let recentBadge = NSImage(size: NSSize(width: 28, height: 28), flipped: false) { @Sendable rect in
+    private static let recentBadge = NSImage(size: NSSize(width: badgeSize, height: badgeSize), flipped: false) { @Sendable rect in
         NSColor.labelColor.withAlphaComponent(0.1).setFill()
         NSBezierPath(ovalIn: rect).fill()
         guard let glyph = NSImage(systemSymbolName: "waveform", accessibilityDescription: nil)?
-            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 12, weight: .semibold).applying(.init(paletteColors: [.labelColor])))
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold).applying(.init(paletteColors: [.labelColor])))
         else { return true }
         glyph.draw(in: NSRect(x: rect.midX - glyph.size.width / 2, y: rect.midY - glyph.size.height / 2, width: glyph.size.width, height: glyph.size.height))
         return true
@@ -99,7 +100,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
                 items.append(actionItem("Open Privacy Settings…", #selector(openPrivacySettings), value: pane.url))
             }
         }
-        items += [reduceEchoItem(), .separator(), .sectionHeader(title: "Recent")]
+        items += [.separator(), reduceEchoItem(), .separator(), .sectionHeader(title: "Recent")]
         if let recordings = recent.items {
             items += recordings.isEmpty ? [disabledItem("No recordings yet.")] : recordings.map(recentItem)
         }
