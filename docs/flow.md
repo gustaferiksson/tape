@@ -79,6 +79,7 @@ Clicking the label opens a native menu built the way macOS 26's own extras (Wi-F
      MacBook Pro Microphone               detail line: default input
      ⚠ status line (optional)           custom row, not selectable
      Open Privacy Settings…             standard item (optional)
+──
 Reduce Echo                       [◯]   custom row with a switch
 ──
 Recent                                  section header
@@ -104,7 +105,7 @@ Only the rows that can't be standard items are custom views: Record (badge, live
 | Part | Behaviour |
 |---|---|
 | Layout | 14 pt leading inset (badge or text), 4 pt vertical padding; titles 13 pt (`.body`), detail lines 11 pt (`.subheadline`) secondary, as in Wi-Fi's network rows |
-| Badge | A 28 pt red circle with a white glyph, Wi-Fi's style of a coloured badge. It stays red on the selection highlight |
+| Badge | A 26 pt vivid red circle (Display P3 1, 0.26, 0.23, brighter than `systemRed`) with an 11 pt white glyph, Wi-Fi's style of a coloured badge. It stays red on the selection highlight |
 | Colour in the menu | The menu window is never key in an active app, so AppKit controls inside it draw inactive: an `NSSwitch` (SwiftUI's `.switch` toggle style) loses its accent tint, and neither `.tint`, `\.appearsActive` nor `\.controlActiveState` changes that. Plain SwiftUI fills keep their colour, so the switch is drawn as a small SwiftUI capsule in the accent colour (28×16 pt, white knob; on the selection highlight a translucent white track) |
 | Selection | Custom views don't highlight themselves. `menu(_:willHighlight:)` records the highlighted item in an `@Observable` `MenuHighlight`, so mouse hover and arrow keys both reach the SwiftUI row, which draws `selectedContentBackgroundColor` in a rounded rect (8 pt radius, inset 5 pt) with `selectedMenuItemTextColor` text, to match the standard items around it |
 | Click | Custom views get mouse events but no action. A small `NSHostingView` subclass sends its item's action on mouse up (if the item is enabled), the same action Return sends on a highlighted item. Record's action cancels tracking first, so the menu closes like after any item |
@@ -142,7 +143,7 @@ At most one, directly under the Record row: a custom row (it wraps, which a stan
 
 ### Reduce Echo
 
-A custom row directly under Record, the height of a standard item: "Reduce Echo" in the regular menu font on the left, a mini switch on the right. The same setting as in Settings (§12). Clicking anywhere on the row flips the switch and keeps the menu open, as Wi-Fi's switch does (the switch itself ignores hits so a click never flips it twice). Return on the highlighted row flips it and closes the menu, like any item.
+A custom row under Record, after a separator, the height of a standard item: "Reduce Echo" in the regular menu font on the left, a mini switch on the right. The same setting as in Settings (§12). Clicking anywhere on the row flips the switch and keeps the menu open, as Wi-Fi's switch does (the switch itself ignores hits so a click never flips it twice). Return on the highlighted row flips it and closes the menu, like any item.
 
 - While recording or saving the item is disabled, the switch dims, and the row adds "Applies from the next recording." under the label, so it's clear why it's locked and that it still shows the setting.
 

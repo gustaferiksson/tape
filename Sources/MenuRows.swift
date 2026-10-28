@@ -79,7 +79,7 @@ struct NoticeRow: View {
         MenuRow(isHighlighted: false) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Image(systemName: symbol)
-                    .frame(width: 28)
+                    .frame(width: StatusMenu.badgeSize)
                     .accessibilityHidden(true)
                 Text(notice.text)
                     .fixedSize(horizontal: false, vertical: true)
@@ -116,10 +116,10 @@ private struct MenuBadge: View {
 
     var body: some View {
         Image(systemName: symbol)
-            .font(.system(size: 12, weight: .semibold))
+            .font(.system(size: 11, weight: .semibold))
             .foregroundStyle(.white)
-            .frame(width: 28, height: 28)
-            .background(.red, in: .circle)
+            .frame(width: StatusMenu.badgeSize, height: StatusMenu.badgeSize)
+            .background(Color(.displayP3, red: 1, green: 0.26, blue: 0.23), in: .circle)
             .accessibilityHidden(true)
     }
 }
