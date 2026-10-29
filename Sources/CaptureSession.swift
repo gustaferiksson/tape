@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreAudio
+import os
 import Synchronization
 import TapeCore
 
@@ -100,6 +101,7 @@ final class CaptureSession: @unchecked Sendable {
                         do {
                             try startMicrophone()
                         } catch {
+                            Logger(subsystem: "dev.gustaf.tape", category: "capture").error("Reduce Echo couldn’t start: \(error, privacy: .public)")
                             stopMicrophone()
                             microphonePath = .aggregate
                         }

@@ -25,7 +25,7 @@ It works alongside Teams, Zoom, Meet or anything else that makes sound. Tape nev
 | | |
 |---|---|
 | **One file** | System audio and microphone mixed into one mono AAC `.m4a` (about 30 MB per hour), named like a screenshot: `Tape 2026-10-26 at 14.03.05.m4a`. |
-| **Menu bar** | The label shows the elapsed time while recording, in plain monochrome so it never imitates the system's privacy indicators. Its menu, built like the system's Wi-Fi and Sound menus, has one Record/Stop row with a live timer, a Reduce Echo switch, and your recent recordings (click to show in Finder). |
+| **Menu bar** | The label shows the elapsed time while recording, in plain monochrome so it never imitates the system's privacy indicators. Its menu, built like the system's Wi-Fi and Sound menus, has one Record/Stop row with a live timer, a Reduce Echo switch, and your recent recordings (click to open). |
 | **Crash safe** | The file is written in fragments, so a crash or power loss loses at most about 10 seconds, and Tape recovers the file on next launch. |
 | **Device changes** | Plug in headphones or switch microphones mid-call and Tape follows the system default input, keeping audio in sync. |
 | **Quiet** | No notifications, no windows unless you ask. Quitting or logging out mid-recording saves the file first. |

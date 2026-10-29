@@ -155,12 +155,12 @@ A native section header (`NSMenuItem.sectionHeader(title: "Recent")`), then the 
 |---|---|
 | Source | Files named by Tape (`Tape yyyy-MM-dd at HH.mm.ss[ N].m4a/.mov`, parsed in TapeCore) in the save folder, plus the last recording wherever it is. That covers a recording that fell back to Movies › Tape and a recovered one. The in-progress file is left out while recording |
 | Order | Newest first, by the start time in the name (the filename is the start time, §9), not by file dates, which copying changes |
-| Item | Image: `waveform.circle.fill` in a neutral palette, the badge size of the Record row. Title: relative day and time ("Today at 13:02", "Yesterday at 16:45", "24 Oct 2026 at 12:03", the system's relative date formatting). Subtitle: the duration (`m:ss`, `h:mm:ss`). Tooltip "Show in Finder" |
-| Click | **Reveals the file in Finder** (selects it). Not Open: Tape has no player, and opening launches Music or QuickTime, which isn't why people record a call. The files exist to be handed to other apps, which is what Finder is for |
-| Drag, context menu | Not in a menu. Drag the file from the Finder window the click opens |
+| Item | Image: `waveform.circle.fill` in a neutral palette, the badge size of the Record row. Title: relative day and time ("Today at 13:02", "Yesterday at 16:45", "24 Oct 2026 at 12:03", the system's relative date formatting). Subtitle: the duration (`m:ss`, `h:mm:ss`). No tooltip |
+| Click | **Opens the file** in its default app (QuickTime Player unless changed). Show All Recordings… is the way to the files in Finder |
+| Drag, context menu | Not in a menu. Drag the file from the Finder window Show All Recordings… opens |
 | Duration | Read with `AVURLAsset` off the main thread, cached by path and modification date, so opening the menu never waits. Until it's known the item has no subtitle rather than a placeholder |
 | Refresh | Every time the menu opens and whenever a recording stops, off the main thread (the folder can be on a network volume). A refresh that finishes after the menu opened shows at the next open; the stop-time refresh keeps that rare |
-| Deleted outside Tape | Gone at the next refresh. Clicking an item whose file has just gone refreshes the list instead of revealing nothing |
+| Deleted outside Tape | Gone at the next refresh. Clicking an item whose file has just gone refreshes the list instead of opening nothing |
 | Empty | "No recordings yet." as a disabled item under the header, then Show All Recordings…. The header stays, so the menu doesn't change shape after the first recording |
 
 ### Standard items
@@ -178,7 +178,7 @@ Standard menu keyboard handling, nothing custom:
 | Key | Action |
 |---|---|
 | ↓ / ↑ | Moves the selection, custom rows included (the status line is skipped). Record is first |
-| Return | Activates the selected item and closes the menu: Record or Stop, flip Reduce Echo, reveal a recording |
+| Return | Activates the selected item and closes the menu: Record or Stop, flip Reduce Echo, open a recording |
 | ⌘, | Settings |
 | ⌘Q | Quit Tape, or Stop and Quit while recording |
 | Esc | Closes the menu |
