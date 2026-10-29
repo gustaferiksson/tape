@@ -137,11 +137,10 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     }
 
     private func recentItem(_ recording: RecentRecordings.Item) -> NSMenuItem {
-        let item = actionItem(Self.dateFormatter.string(from: recording.startedAt), #selector(revealRecording), value: recording.url)
+        let item = actionItem(Self.dateFormatter.string(from: recording.startedAt), #selector(openRecording), value: recording.url)
         item.subtitle = recording.duration.map(ElapsedTime.clock)
         item.image = Self.recentBadge
         if #available(macOS 27, *) { item.preferredImageVisibility = .visible }
-        item.toolTip = "Show in Finder"
         return item
     }
 
@@ -182,9 +181,9 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         settings.reducesEcho.toggle()
     }
 
-    @objc private func revealRecording(_ sender: NSMenuItem) {
+    @objc private func openRecording(_ sender: NSMenuItem) {
         guard let url = sender.representedObject as? URL, FileManager.default.fileExists(atPath: url.path) else { return recent.refresh() }
-        NSWorkspace.shared.activateFileViewerSelecting([url])
+        NSWorkspace.shared.open(url)
     }
 
     @objc private func openPrivacySettings(_ sender: NSMenuItem) {
