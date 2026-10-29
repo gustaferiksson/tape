@@ -94,7 +94,6 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         var items = [recordItem()]
         if let notice = recorder.notice {
             let item = viewItem(NSHostingView(rootView: NoticeRow(notice: notice)))
-            item.title = notice.text
             items.append(item)
             if let pane = notice.privacyPane {
                 items.append(actionItem("Open Privacy Settings…", #selector(openPrivacySettings), value: pane.url))
