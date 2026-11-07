@@ -169,7 +169,8 @@ final class CaptureSession: @unchecked Sendable {
             kAudioAggregateDeviceUIDKey: "dev.gustaf.tape.aggregate.\(UUID().uuidString)",
             kAudioAggregateDeviceIsPrivateKey: true,
             kAudioAggregateDeviceIsStackedKey: false,
-            kAudioAggregateDeviceTapAutoStartKey: true,
+            // With auto-start, macOS 27 runs the device (mic included) only while something is already playing.
+            kAudioAggregateDeviceTapAutoStartKey: false,
             kAudioAggregateDeviceMainSubDeviceKey: clockUID,
             kAudioAggregateDeviceSubDeviceListKey: [[kAudioSubDeviceUIDKey: clockUID, kAudioSubDeviceDriftCompensationKey: true]],
             kAudioAggregateDeviceTapListKey: [[kAudioSubTapUIDKey: tap.description.uuid.uuidString, kAudioSubTapDriftCompensationKey: true]],
