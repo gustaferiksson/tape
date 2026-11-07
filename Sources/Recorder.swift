@@ -14,6 +14,7 @@ final class Recorder {
 
     private static let minimumFreeBytesToStart: Int64 = 500_000_000
     private static let minimumFreeBytesWhileRecording: Int64 = 200_000_000
+    private static let minimumAudioFileBytes = 4096
 
     private(set) var phase = Phase.idle
     private(set) var elapsed = 0
@@ -118,7 +119,11 @@ final class Recorder {
         timer?.invalidate()
         let hadSystemAudio = await session.finish()
         if hadSystemAudio { settings.store.set(true, forKey: "systemAudioConfirmed") }
-        lastRecording = url
+        if ((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) < Self.minimumAudioFileBytes {
+            try? FileManager.default.removeItem(at: url)
+        } else {
+            lastRecording = url
+        }
         notice = reason.map(Notice.stopped)
             ?? fallbackFrom.map { Notice.fellBack(folder: $0) }
             ?? (!hadSystemAudio && elapsed >= 60 ? .noSystemAudio : nil)
@@ -136,7 +141,7 @@ final class Recorder {
         settings.store.removeObject(forKey: "inProgressRecording")
         let url = URL(filePath: path)
         guard FileManager.default.fileExists(atPath: path) else { return }
-        if ((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) < 4096 {
+        if ((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) < Self.minimumAudioFileBytes {
             try? FileManager.default.removeItem(at: url)
             return
         }
@@ -177,9 +182,8 @@ final class Recorder {
     }
 
     private func stopForDeniedSystemAudio() async {
-        guard let url = recordingURL else { return }
+        guard recordingURL != nil else { return }
         await stop()
-        if ((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) < 4096 { try? FileManager.default.removeItem(at: url) }
         notice = .systemAudioDenied
     }
 
