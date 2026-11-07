@@ -117,7 +117,7 @@ Only the rows that can't be standard items are custom views: Record (badge, live
 |---|---|---|
 | Idle | Red badge with a white `circle.fill` dot, "Record Audio" | The default input's name ("MacBook Pro Microphone"), or "No microphone" when there's no input device |
 | Starting (prompts, writer setup) | Same, dimmed and disabled, "Starting…" | Same as idle |
-| Recording | Red badge with `stop.fill`, "Stop Recording", live elapsed time trailing in monospaced digits | "Recording audio · since 14:03" (`· saving to Movies › Tape` appended when it fell back, §9). "Microphone: AirPods Pro", the live default input, or "Microphone unavailable" |
+| Recording | Red badge with `stop.fill`, "Stop Recording", live elapsed time trailing in monospaced digits | One line: the live default input, then the start time: "AirPods Pro · since 14:03", or "Microphone unavailable · since 14:03" (`· saving to Movies › Tape` appended when it fell back, §9) |
 | Saving (finalising, usually under 1 s) | Dimmed and disabled, "Saving…", the time frozen | Same lines as recording |
 
 - Record and Stop are the same row, so it never moves, and it's the first item, where the down arrow lands first. Record Screen… (§6, not built yet) will be a second row under it.
@@ -215,7 +215,7 @@ Tape asks for nothing at launch (HIG: request only when the feature is used). No
 | Record clicked while the mic is denied | Opens `x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone` directly. No alert, never a second nag |
 | System audio denied | The same pattern, opening `Privacy_ScreenCapture` (the pane holds the "System Audio Recording Only" list; verify the anchor) |
 | Both permissions required? | **Yes.** A call recording without the other side, or without you, is the wrong file. There's no mic-only or system-only mode in v1 |
-| Revoked while recording | If macOS terminates Tape, crash recovery applies (§8). If the mic simply goes silent, keep recording, and the mic line in the menu reads "Microphone unavailable" |
+| Revoked while recording | If macOS terminates Tape, crash recovery applies (§8). If the mic simply goes silent, keep recording, and the Record row's detail line reads "Microphone unavailable · since …" |
 | Granted later in System Settings | Picked up on `didBecomeActive` and the next menu open. The status line disappears |
 | System audio silent although "allowed" | After a stop, if the system track of a recording over 60 s was all digital zero, show "The last recording has no system audio." once. This catches a revoked permission that the API missed. A tap also delivers digital zero when nothing is playing, so a recording with no call audio at all triggers it falsely; acceptable, since Tape is for calls |
 | No audio at all | If nothing has reached the file 5 s after Record (the capture device started but never delivered a buffer), stop with "Recording stopped: the audio device stopped working." Any recording that ends with no audio (under 4 KB) is deleted rather than listed under Recent |
@@ -275,7 +275,7 @@ The recovered file keeps its original name. The status line reads: Recovered "Ta
 | Folder state at start | Behaviour |
 |---|---|
 | Default folder missing | Recreate it silently |
-| Custom folder missing (for example an unmounted drive) or unwritable | Record to `~/Movies/Tape` instead. The menu's "Recording audio" line adds "· saving to Movies › Tape". The idle status line explains the fallback afterwards. Losing the call is worse than a different folder |
+| Custom folder missing (for example an unmounted drive) or unwritable | Record to `~/Movies/Tape` instead. The Record row's detail line adds "· saving to Movies › Tape". The idle status line explains the fallback afterwards. Losing the call is worse than a different folder |
 | Less than 1 GB free (screen) or 500 MB (audio) | Don't start. Show the status line from §4 |
 
 ## 10. System indicators
