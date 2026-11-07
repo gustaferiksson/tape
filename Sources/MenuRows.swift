@@ -21,12 +21,9 @@ struct RecordRow: View {
                         }
                     }
                     if let since = recorder.startedAt {
-                        Group {
-                            Text("Recording audio · since \(since.formatted(date: .omitted, time: .shortened))\(recorder.isSavingToFallback ? " · saving to Movies › Tape" : "")")
-                            Text(recorder.microphoneName.map { "Microphone: \($0)" } ?? "Microphone unavailable")
-                        }
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        Text("\(recorder.microphoneName ?? "Microphone unavailable") · since \(since.formatted(date: .omitted, time: .shortened))\(recorder.isSavingToFallback ? " · saving to Movies › Tape" : "")")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
                     } else {
                         Text(microphone.name ?? "No microphone")
                             .font(.subheadline)
