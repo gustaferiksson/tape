@@ -28,6 +28,7 @@ struct CaptureError: LocalizedError {
 final class CaptureSession: @unchecked Sendable {
     private static let outputRate = 48000.0
     private static let rebuildAttemptsWithMicrophone = 3
+    private static let firstAudioTimeout = 5.0
 
     private let controlQueue = DispatchQueue(label: "dev.gustaf.tape.control")
     private let controlOperations = OperationQueue()
@@ -111,6 +112,10 @@ final class CaptureSession: @unchecked Sendable {
                     try startAggregate(includeMicrophone: microphonePath == .aggregate)
                     listenForDefaultDevices()
                     if probesTap { scheduleProbes() }
+                    processingQueue.asyncAfter(deadline: .now() + Self.firstAudioTimeout) { [weak self] in
+                        guard let self, !isFinished, framesWritten == 0 else { return }
+                        onEvent(.deviceFailed)
+                    }
                     done.resume(returning: microphonePath)
                 } catch {
                     done.resume(throwing: error)
@@ -266,19 +271,21 @@ final class CaptureSession: @unchecked Sendable {
         let input = engine.inputNode
         try input.setVoiceProcessingEnabled(true)
         input.voiceProcessingOtherAudioDuckingConfiguration = AVAudioVoiceProcessingOtherAudioDuckingConfiguration(enableAdvancedDucking: false, duckingLevel: .min)
-        // The voice-processing unit is duplex and needs its output side in the graph to start.
-        engine.mainMixerNode.outputVolume = 0
         let nodeFormat = input.outputFormat(forBus: 0)
         guard nodeFormat.sampleRate > 0, nodeFormat.channelCount > 0,
-              let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: nodeFormat.sampleRate, channels: 1, interleaved: false)
+              let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: nodeFormat.sampleRate, channels: 1, interleaved: false),
+              let duplexFormat = AVAudioFormat(standardFormatWithSampleRate: nodeFormat.sampleRate, channels: 2)
         else { throw CaptureError("The microphone has no audio format.") }
+        // The voice-processing unit is duplex and fails to initialize (-10875) unless its output side runs at the microphone's rate; the mixer defaults to 44.1 kHz.
+        engine.connect(engine.mainMixerNode, to: engine.outputNode, format: duplexFormat)
+        engine.mainMixerNode.outputVolume = 0
+        self.engine = engine
         // A stopped engine's tap block can still be in flight while the next engine's starts, and the ring allows one producer.
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, time in
             self?.microphoneWriter.withLock { _ in Self.capture(buffer, at: time, into: microphoneRing) }
         }
         engine.prepare()
         try engine.start()
-        self.engine = engine
         engineObserver = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: controlOperations) { [weak self] _ in
             self?.requestMicrophoneRestart()
         }
