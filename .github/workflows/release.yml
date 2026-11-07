@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   release:
-    uses: gustaferiksson/macos-release/.github/workflows/release.yml@main
+    uses: gustaferiksson/macos-release/.github/workflows/release.yml@6d88888e7a9b6418de945c26f96a468a40075b9a # v0.1.0
     secrets: inherit
     with:
       # AppUpdater downloads Tape-<version>.zip, and the shared workflow names the zip after `name`.
