@@ -88,7 +88,6 @@ enum MenuSnapshot {
             ("idle-echo-highlighted", nil, nil, nil, recordings, StatusMenu.reduceEchoItem, true, "MacBook Pro Microphone"),
             ("recording", started, nil, nil, recordings, nil, true, "MacBook Pro Microphone"),
             ("recording-highlighted", started, nil, nil, recordings, StatusMenu.recordItem, true, "MacBook Pro Microphone"),
-            ("recording-notice", started, .reduceEchoUnavailable, "0.3.0", recordings, nil, true, "MacBook Pro Microphone"),
             ("notice", nil, .microphoneDenied, nil, recordings, nil, true, "MacBook Pro Microphone"),
             ("notice-info", nil, .fellBack(folder: "Call Recordings"), nil, recordings, nil, true, "MacBook Pro Microphone"),
             ("update", nil, nil, "0.3.0", recordings, nil, true, "MacBook Pro Microphone"),

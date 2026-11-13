@@ -82,11 +82,10 @@ final class Recorder {
         settings.store.set(["path": url.path, "pid": Int(getpid())], forKey: "inProgressRecording")
         let id = UUID()
         sessionID = id
-        let requestedPath: MicrophonePath = settings.reducesEcho ? .voiceProcessing : .aggregate
-        let session = try? CaptureSession(url: url, probesTap: settings.store.bool(forKey: "systemAudioConfirmed"), microphonePath: requestedPath) { [weak self] event in
+        let session = try? CaptureSession(url: url, probesTap: settings.store.bool(forKey: "systemAudioConfirmed"), makeEchoCanceller: settings.reducesEcho ? EchoCanceller.init : nil) { [weak self] event in
             Task { @MainActor in self?.handle(event, from: id) }
         }
-        guard let session, let microphonePath = try? await session.start() else {
+        guard let session, (try? await session.start()) != nil else {
             sessionID = nil
             _ = await session?.finish()
             try? FileManager.default.removeItem(at: url)
@@ -99,7 +98,7 @@ final class Recorder {
         self.session = session
         recordingURL = url
         recordingVolume = space.volume
-        notice = microphonePath == requestedPath ? nil : .reduceEchoUnavailable
+        notice = nil
         elapsed = 0
         let since = Date.now
         phase = .recording(since: since)
@@ -127,7 +126,6 @@ final class Recorder {
         notice = reason.map(Notice.stopped)
             ?? fallbackFrom.map { Notice.fellBack(folder: $0) }
             ?? (!hadSystemAudio && elapsed >= 60 ? .noSystemAudio : nil)
-            ?? (notice == .reduceEchoUnavailable ? notice : nil)
         finishCleanup()
         AccessibilityNotification.Announcement(reason.map { Notice.stopped($0).text } ?? "Recording saved").post()
     }

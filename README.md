@@ -46,7 +46,7 @@ Recording a call without consent is illegal in many places, and rude everywhere 
 
 Tape records audio only.
 
-- **Echo reduction (experimental)**: on speakers, your microphone also hears the other side, so their voices appear twice with a slight delay. Turn on **Reduce Echo** in the menu or in Settings to run your microphone through macOS voice processing. It's off by default while it's being tested in real calls; headphones remain the cleanest option.
+- **Echo reduction (experimental)**: on speakers, your microphone also hears the other side, so their voices appear twice with a slight delay. Turn on **Reduce Echo** in the menu or in Settings so Tape removes the other side's voices from your microphone before mixing. It's off by default while it's being tested in real calls; headphones remain the cleanest option.
 
 Planned next:
 
