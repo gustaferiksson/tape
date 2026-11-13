@@ -1,6 +1,6 @@
+import Accelerate
 import AVFoundation
 import CoreAudio
-import os
 import Synchronization
 import TapeCore
 
@@ -11,11 +11,6 @@ enum CaptureEvent: Sendable, Equatable {
     case writeFailed
 }
 
-enum MicrophonePath: Sendable {
-    case aggregate
-    case voiceProcessing
-}
-
 struct CaptureError: LocalizedError {
     let errorDescription: String?
 
@@ -24,25 +19,22 @@ struct CaptureError: LocalizedError {
     }
 }
 
-// The realtime IOProc only mixes into `ring` (the engine tap into `microphoneRing`). Device state is owned by `controlQueue`; conversion and writing by `processingQueue`.
+// The realtime IOProc only copies into `ring`. Device state is owned by `controlQueue`; echo cancelling, conversion and writing by `processingQueue`.
 final class CaptureSession: @unchecked Sendable {
     private static let outputRate = 48000.0
     private static let rebuildAttemptsWithMicrophone = 3
     private static let firstAudioTimeout = 5.0
 
     private let controlQueue = DispatchQueue(label: "dev.gustaf.tape.control")
-    private let controlOperations = OperationQueue()
     private let processingQueue = DispatchQueue(label: "dev.gustaf.tape.processing", qos: .userInitiated)
-    private let ring = AudioRing(slots: 256, framesPerSlot: 8192)
-    private let microphoneRing: AudioRing?
-    private let microphoneWriter = Mutex(())
-    private var microphonePath: MicrophonePath
+    private let ring = AudioRing(slots: 256, framesPerSlot: 2 * 8192)
     private let deviceRate = Atomic<UInt64>(0)
     private let heardSystemAudio = Atomic<Bool>(false)
     private let writer: AVAssetWriter
     private let input: AVAssetWriterInput
     private let outputFormat: AVAudioFormat
     private let probesTap: Bool
+    private let makeEchoCanceller: (@Sendable (Double) -> EchoCanceller)?
     private let onEvent: @Sendable (CaptureEvent) -> Void
 
     private var tap: (id: AudioObjectID, description: CATapDescription)?
@@ -51,15 +43,11 @@ final class CaptureSession: @unchecked Sendable {
     private var rateListeners: [(AudioObjectID, AudioObjectPropertyListenerBlock)] = []
     private var defaultDeviceListeners: [(AudioObjectPropertySelector, AudioObjectPropertyListenerBlock)] = []
     private var rebuildRequest = 0
-    private var engine: AVAudioEngine?
-    private var engineObserver: NSObjectProtocol?
-    private var microphoneRequest = 0
     private var isStopping = false
     private var didReportDenial = false
 
-    private let systemResampler: Resampler
-    private let microphoneResampler: Resampler
-    private var mix = AlignedMix(sampleRate: CaptureSession.outputRate)
+    private let resampler: Resampler
+    private var echoCanceller: EchoCanceller?
     private var limiter = PeakLimiter(sampleRate: CaptureSession.outputRate)
     private var framesWritten: Int64 = 0
     private var expectedHostSeconds: Double?
@@ -67,7 +55,7 @@ final class CaptureSession: @unchecked Sendable {
     private var drainTimer: DispatchSourceTimer?
     private let silence = [Float](repeating: 0, count: 4096)
 
-    init(url: URL, probesTap: Bool, microphonePath: MicrophonePath, onEvent: @escaping @Sendable (CaptureEvent) -> Void) throws {
+    init(url: URL, probesTap: Bool, makeEchoCanceller: (@Sendable (Double) -> EchoCanceller)?, onEvent: @escaping @Sendable (CaptureEvent) -> Void) throws {
         writer = try AVAssetWriter(outputURL: url, fileType: .m4a)
         writer.movieFragmentInterval = CMTime(seconds: 10, preferredTimescale: 600)
         writer.initialMovieFragmentInterval = CMTime(seconds: 1, preferredTimescale: 600)
@@ -83,40 +71,28 @@ final class CaptureSession: @unchecked Sendable {
             throw CaptureError("Couldn’t describe the output format.")
         }
         self.outputFormat = outputFormat
-        systemResampler = Resampler(outputFormat: outputFormat)
-        microphoneResampler = Resampler(outputFormat: outputFormat)
-        self.microphonePath = microphonePath
-        microphoneRing = microphonePath == .voiceProcessing ? AudioRing(slots: 256, framesPerSlot: 8192) : nil
-        controlOperations.underlyingQueue = controlQueue
+        resampler = Resampler(outputFormat: outputFormat)
         self.probesTap = probesTap
+        self.makeEchoCanceller = makeEchoCanceller
         self.onEvent = onEvent
     }
 
-    func start() async throws -> MicrophonePath {
-        try await withCheckedThrowingContinuation { (done: CheckedContinuation<MicrophonePath, any Error>) in
+    func start() async throws {
+        try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, any Error>) in
             controlQueue.async { [self] in
                 do {
                     guard writer.startWriting() else { throw writer.error ?? CaptureError("Couldn’t create the file.") }
                     writer.startSession(atSourceTime: .zero)
-                    if microphonePath == .voiceProcessing {
-                        do {
-                            try startMicrophone()
-                        } catch {
-                            Logger(subsystem: "dev.gustaf.tape", category: "capture").error("Reduce Echo couldn’t start: \(error, privacy: .public)")
-                            stopMicrophone()
-                            microphonePath = .aggregate
-                        }
-                    }
                     processingQueue.sync { startDraining() }
                     tap = try Self.makeTap()
-                    try startAggregate(includeMicrophone: microphonePath == .aggregate)
+                    try startAggregate(includeMicrophone: true)
                     listenForDefaultDevices()
                     if probesTap { scheduleProbes() }
                     processingQueue.asyncAfter(deadline: .now() + Self.firstAudioTimeout) { [weak self] in
                         guard let self, !isFinished, framesWritten == 0 else { return }
                         onEvent(.deviceFailed)
                     }
-                    done.resume(returning: microphonePath)
+                    done.resume()
                 } catch {
                     done.resume(throwing: error)
                 }
@@ -133,7 +109,6 @@ final class CaptureSession: @unchecked Sendable {
                     AudioObjectRemovePropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, controlQueue, listener)
                 }
                 defaultDeviceListeners = []
-                stopMicrophone()
                 stopAggregate()
                 if let tap { AudioHardwareDestroyProcessTap(tap.id) }
                 tap = nil
@@ -145,8 +120,8 @@ final class CaptureSession: @unchecked Sendable {
                 drainTimer?.cancel()
                 drainTimer = nil
                 drain()
-                output(systemResampler.flush(), hostSeconds: expectedHostSeconds ?? 0)
-                if microphonePath == .voiceProcessing { append(mix.take(flush: true)) }
+                if let echoCanceller { append(resampler.convert(echoCanceller.flush(), rate: echoCanceller.sampleRate)) }
+                append(resampler.flush())
                 isFinished = true
                 if writer.status == .writing { input.markAsFinished() }
                 done.resume()
@@ -187,7 +162,6 @@ final class CaptureSession: @unchecked Sendable {
         let tapIndex = Self.inputStreamCount(of: clockID)
         let streamCount = Self.inputStreamCount(of: aggregate)
         guard streamCount > tapIndex else { throw CaptureError("The capture device has no system audio stream.") }
-        let firstStream = microphonePath == .voiceProcessing ? tapIndex : 0
 
         for object in [aggregate, clockID] {
             let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in self?.sampleRateChanged(on: object) }
@@ -198,14 +172,12 @@ final class CaptureSession: @unchecked Sendable {
 
         var proc: AudioDeviceIOProcID?
         let createdProc = AudioDeviceCreateIOProcIDWithBlock(&proc, aggregate, nil) { [self] _, inputData, inputTime, _, _ in
-            capture(inputData, at: inputTime.pointee, tapIndex: tapIndex, firstStream: firstStream)
+            capture(inputData, at: inputTime.pointee, tapIndex: tapIndex)
         }
         guard createdProc == noErr, let proc else { throw CaptureError("Couldn’t read the capture device.", status: createdProc) }
         procID = proc
-        if firstStream > 0 { Self.enableInputStreams(from: firstStream, of: streamCount, on: aggregate, for: proc) }
         let started = AudioDeviceStart(aggregate, proc)
         guard started == noErr else { throw CaptureError("Couldn’t start the capture device.", status: started) }
-        guard microphonePath == .aggregate else { return }
         onEvent(.microphone(micID.flatMap { Self.string(of: $0, kAudioObjectPropertyName) }))
     }
 
@@ -225,12 +197,9 @@ final class CaptureSession: @unchecked Sendable {
     }
 
     private func listenForDefaultDevices() {
-        let listeners: [(AudioObjectPropertySelector, AudioObjectPropertyListenerBlock)] = microphonePath == .aggregate
-            ? [(kAudioHardwarePropertyDefaultInputDevice, { [weak self] _, _ in self?.requestRebuild() })]
-            : [
-                (kAudioHardwarePropertyDefaultOutputDevice, { [weak self] _, _ in self?.requestRebuild() }),
-                (kAudioHardwarePropertyDefaultInputDevice, { [weak self] _, _ in self?.requestMicrophoneRestart() }),
-            ]
+        let listeners: [(AudioObjectPropertySelector, AudioObjectPropertyListenerBlock)] = [
+            (kAudioHardwarePropertyDefaultInputDevice, { [weak self] _, _ in self?.requestRebuild() }),
+        ]
         for (selector, listener) in listeners {
             var address = Self.address(selector)
             AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, controlQueue, listener)
@@ -254,7 +223,7 @@ final class CaptureSession: @unchecked Sendable {
         guard !isStopping, request == rebuildRequest else { return }
         stopAggregate()
         do {
-            try startAggregate(includeMicrophone: microphonePath == .aggregate && attempt < Self.rebuildAttemptsWithMicrophone)
+            try startAggregate(includeMicrophone: attempt < Self.rebuildAttemptsWithMicrophone)
             return
         } catch {
             stopAggregate()
@@ -264,64 +233,6 @@ final class CaptureSession: @unchecked Sendable {
             return
         }
         controlQueue.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.rebuild(request: request, attempt: attempt + 1) }
-    }
-
-    private func startMicrophone() throws {
-        guard let microphoneRing else { return }
-        let engine = AVAudioEngine()
-        let input = engine.inputNode
-        try input.setVoiceProcessingEnabled(true)
-        input.voiceProcessingOtherAudioDuckingConfiguration = AVAudioVoiceProcessingOtherAudioDuckingConfiguration(enableAdvancedDucking: false, duckingLevel: .min)
-        let nodeFormat = input.outputFormat(forBus: 0)
-        guard nodeFormat.sampleRate > 0, nodeFormat.channelCount > 0,
-              let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: nodeFormat.sampleRate, channels: 1, interleaved: false),
-              let duplexFormat = AVAudioFormat(standardFormatWithSampleRate: nodeFormat.sampleRate, channels: 2)
-        else { throw CaptureError("The microphone has no audio format.") }
-        // The voice-processing unit is duplex and fails to initialize (-10875) unless its output side runs at the microphone's rate; the mixer defaults to 44.1 kHz.
-        engine.connect(engine.mainMixerNode, to: engine.outputNode, format: duplexFormat)
-        engine.mainMixerNode.outputVolume = 0
-        self.engine = engine
-        // A stopped engine's tap block can still be in flight while the next engine's starts, and the ring allows one producer.
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, time in
-            self?.microphoneWriter.withLock { _ in Self.capture(buffer, at: time, into: microphoneRing) }
-        }
-        engine.prepare()
-        try engine.start()
-        engineObserver = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: controlOperations) { [weak self] _ in
-            self?.requestMicrophoneRestart()
-        }
-        onEvent(.microphone(Self.defaultDevice(kAudioHardwarePropertyDefaultInputDevice).flatMap { Self.string(of: $0, kAudioObjectPropertyName) }))
-    }
-
-    private func stopMicrophone() {
-        if let engineObserver { NotificationCenter.default.removeObserver(engineObserver) }
-        engineObserver = nil
-        engine?.inputNode.removeTap(onBus: 0)
-        engine?.stop()
-        engine = nil
-    }
-
-    private func requestMicrophoneRestart() {
-        guard !isStopping else { return }
-        microphoneRequest += 1
-        let request = microphoneRequest
-        controlQueue.async { [weak self] in self?.restartMicrophone(request: request, attempt: 0) }
-    }
-
-    private func restartMicrophone(request: Int, attempt: Int) {
-        guard !isStopping, request == microphoneRequest else { return }
-        stopMicrophone()
-        do {
-            try startMicrophone()
-            return
-        } catch {
-            stopMicrophone()
-        }
-        guard attempt < Self.rebuildAttemptsWithMicrophone else {
-            onEvent(.microphone(nil))
-            return
-        }
-        controlQueue.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.restartMicrophone(request: request, attempt: attempt + 1) }
     }
 
     private func scheduleProbes() {
@@ -344,17 +255,18 @@ final class CaptureSession: @unchecked Sendable {
 
     // MARK: Realtime IOProc
 
-    private func capture(_ data: UnsafePointer<AudioBufferList>, at time: AudioTimeStamp, tapIndex: Int, firstStream: Int) {
+    private func capture(_ data: UnsafePointer<AudioBufferList>, at time: AudioTimeStamp, tapIndex: Int) {
         let buffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: data))
         guard let first = buffers.first(where: { $0.mData != nil && $0.mNumberChannels > 0 }) else { return }
         let available = Int(first.mDataByteSize) / MemoryLayout<Float>.size / Int(first.mNumberChannels)
         let hostSeconds = Double(AudioConvertHostTimeToNanos(time.mHostTime)) / 1e9
         let rate = Double(bitPattern: deviceRate.load(ordering: .relaxed))
         ring.write(hostSeconds: hostSeconds, sampleRate: rate) { slot in
-            let frames = min(available, slot.count)
-            let output = UnsafeMutableBufferPointer(rebasing: slot[0..<frames])
-            output.update(repeating: 0)
-            for index in buffers.indices where index >= firstStream {
+            let frames = min(available, slot.count / 2)
+            slot[0..<2 * frames].update(repeating: 0)
+            let system = UnsafeMutableBufferPointer(rebasing: slot[0..<frames])
+            let microphone = UnsafeMutableBufferPointer(rebasing: slot[frames..<2 * frames])
+            for index in buffers.indices {
                 let buffer = buffers[index]
                 guard let raw = buffer.mData, buffer.mNumberChannels > 0 else { continue }
                 let stream = InterleavedStream(
@@ -364,21 +276,9 @@ final class CaptureSession: @unchecked Sendable {
                 if index == tapIndex, !heardSystemAudio.load(ordering: .relaxed), stream.samples.contains(where: { $0 != 0 }) {
                     heardSystemAudio.store(true, ordering: .relaxed)
                 }
-                Mixer.addLoudestChannel(of: stream, into: output)
+                Mixer.addLoudestChannel(of: stream, into: index < tapIndex ? microphone : system)
             }
-            return frames
-        }
-    }
-
-    private static func capture(_ buffer: AVAudioPCMBuffer, at time: AVAudioTime, into ring: AudioRing) {
-        guard let channel = buffer.floatChannelData?[0] else { return }
-        let stride = buffer.stride
-        let frames = Int(buffer.frameLength)
-        let hostTime = time.isHostTimeValid ? time.hostTime : AudioGetCurrentHostTime()
-        ring.write(hostSeconds: Double(AudioConvertHostTimeToNanos(hostTime)) / 1e9, sampleRate: buffer.format.sampleRate) { slot in
-            let count = min(frames, slot.count)
-            for frame in 0..<count { slot[frame] = channel[frame * stride] }
-            return count
+            return 2 * frames
         }
     }
 
@@ -394,36 +294,33 @@ final class CaptureSession: @unchecked Sendable {
 
     private func drain() {
         while !isFinished, ring.read({ chunk, samples in consume(chunk, samples) }) {}
-        guard let microphoneRing else { return }
-        while !isFinished, microphoneRing.read({ chunk, samples in consumeMicrophone(chunk, samples) }) {}
     }
 
     private func consume(_ chunk: AudioRingChunk, _ samples: UnsafeBufferPointer<Float>) {
         guard chunk.sampleRate > 0 else { return }
+        let frames = samples.count / 2
         var gap = expectedHostSeconds.map { SilenceGap.frames(expectedSeconds: $0, actualSeconds: chunk.hostSeconds, sampleRate: chunk.sampleRate) } ?? 0
         while gap > 0 {
-            let count = min(gap, silence.count)
-            let converted = silence.withUnsafeBufferPointer { systemResampler.convert(UnsafeBufferPointer(rebasing: $0[0..<count]), rate: chunk.sampleRate) }
-            output(converted, hostSeconds: chunk.hostSeconds - Double(gap) / chunk.sampleRate)
-            gap -= count
+            let zeros = silence.prefix(gap)
+            mix(system: zeros, microphone: zeros, rate: chunk.sampleRate)
+            gap -= zeros.count
         }
-        expectedHostSeconds = chunk.hostSeconds + Double(chunk.frames) / chunk.sampleRate
-        output(systemResampler.convert(samples, rate: chunk.sampleRate), hostSeconds: chunk.hostSeconds)
+        expectedHostSeconds = chunk.hostSeconds + Double(frames) / chunk.sampleRate
+        mix(system: samples[0..<frames], microphone: samples[frames...], rate: chunk.sampleRate)
     }
 
-    private func consumeMicrophone(_ chunk: AudioRingChunk, _ samples: UnsafeBufferPointer<Float>) {
-        guard chunk.sampleRate > 0 else { return }
-        mix.appendMic(microphoneResampler.convert(samples, rate: chunk.sampleRate), hostSeconds: chunk.hostSeconds)
-        append(mix.take())
-    }
-
-    private func output(_ samples: [Float], hostSeconds: Double) {
-        guard microphonePath == .voiceProcessing else {
-            append(samples)
+    private func mix<Plane: AccelerateBuffer & Sequence<Float>>(system: Plane, microphone: Plane, rate: Double) {
+        guard let makeEchoCanceller else {
+            append(resampler.convert(vDSP.add(system, microphone), rate: rate))
             return
         }
-        mix.appendSystem(samples, hostSeconds: hostSeconds)
-        append(mix.take())
+        if let echoCanceller, echoCanceller.sampleRate != rate {
+            append(resampler.convert(echoCanceller.flush(), rate: echoCanceller.sampleRate))
+            self.echoCanceller = nil
+        }
+        let canceller = echoCanceller ?? makeEchoCanceller(rate)
+        echoCanceller = canceller
+        append(resampler.convert(vDSP.add(system, canceller.process(microphone: microphone, reference: system)), rate: rate))
     }
 
     private func append(_ samples: [Float]) {
@@ -475,21 +372,6 @@ final class CaptureSession: @unchecked Sendable {
         return (tapID, description)
     }
 
-    private static func enableInputStreams(from first: Int, of count: Int, on device: AudioObjectID, for proc: AudioDeviceIOProcID) {
-        let flagsOffset = MemoryLayout<AudioHardwareIOProcStreamUsage>.offset(of: \.mStreamIsOn) ?? 0
-        let countOffset = MemoryLayout<AudioHardwareIOProcStreamUsage>.offset(of: \.mNumberStreams) ?? 0
-        let size = flagsOffset + count * MemoryLayout<UInt32>.stride
-        let usage = UnsafeMutableRawPointer.allocate(byteCount: size, alignment: MemoryLayout<AudioHardwareIOProcStreamUsage>.alignment)
-        defer { usage.deallocate() }
-        usage.storeBytes(of: unsafeBitCast(proc, to: UnsafeMutableRawPointer.self), as: UnsafeMutableRawPointer.self)
-        usage.storeBytes(of: UInt32(count), toByteOffset: countOffset, as: UInt32.self)
-        for stream in 0..<count {
-            usage.storeBytes(of: UInt32(stream >= first ? 1 : 0), toByteOffset: flagsOffset + stream * MemoryLayout<UInt32>.stride, as: UInt32.self)
-        }
-        var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyIOProcStreamUsage, mScope: kAudioObjectPropertyScopeInput, mElement: kAudioObjectPropertyElementMain)
-        AudioObjectSetPropertyData(device, &address, 0, nil, UInt32(size), usage)
-    }
-
     private static func sampleRate(of device: AudioObjectID) -> Double? {
         var rate = Float64(0)
         var size = UInt32(MemoryLayout<Float64>.size)
@@ -535,20 +417,20 @@ private final class Resampler {
         self.outputFormat = outputFormat
     }
 
-    func convert(_ samples: UnsafeBufferPointer<Float>, rate: Double) -> [Float] {
+    func convert(_ samples: [Float], rate: Double) -> [Float] {
         let flushed = rate == self.rate ? [] : flush()
         if converter == nil {
             converter = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: rate, channels: 1, interleaved: false)
                 .flatMap { AVAudioConverter(from: $0, to: outputFormat) }
             self.rate = rate
         }
-        guard !samples.isEmpty, let converter, let base = samples.baseAddress,
+        guard !samples.isEmpty, let converter,
               let source = AVAudioPCMBuffer(pcmFormat: converter.inputFormat, frameCapacity: AVAudioFrameCount(samples.count)),
               let destination = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: AVAudioFrameCount(Double(samples.count) * outputFormat.sampleRate / rate) + 1024),
               let sourceChannel = source.floatChannelData?[0]
         else { return flushed }
         source.frameLength = AVAudioFrameCount(samples.count)
-        sourceChannel.update(from: base, count: samples.count)
+        sourceChannel.update(from: samples, count: samples.count)
         var supplied = false
         var error: NSError?
         converter.convert(to: destination, error: &error) { _, status in
